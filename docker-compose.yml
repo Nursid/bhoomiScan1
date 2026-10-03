@@ -1,0 +1,27 @@
+# Local development dependencies. API runs on the host: `npm run dev`.
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: bhoomiscan-postgres
+    environment:
+      POSTGRES_USER: bhoomiscan
+      POSTGRES_PASSWORD: bhoomiscan
+      POSTGRES_DB: bhoomiscan
+    ports:
+      - "5436:5432"
+    volumes:
+      - bhoomiscan-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bhoomiscan"]
+      interval: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: bhoomiscan-redis
+    ports:
+      - "6380:6379"
+    profiles: ["redis"]
+
+volumes:
+  bhoomiscan-pg:

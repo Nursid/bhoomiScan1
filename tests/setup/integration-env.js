@@ -1,0 +1,22 @@
+// Integration tests: real PostgreSQL (TEST_DATABASE_URL), external HTTP faked per test.
+Object.assign(process.env, {
+  NODE_ENV: 'test',
+  DOTENV_PATH: '/nonexistent/.env',
+  DATABASE_URL: process.env.TEST_DATABASE_URL || 'postgresql://bhoomiscan:bhoomiscan@localhost:5436/bhoomiscan_test?schema=public',
+  JWT_SECRET: 'integration-test-secret-that-is-longer-than-32-chars',
+  SUREPASS_BASE_URL: 'https://sandbox.surepass.test',
+  SUREPASS_TOKEN: 'surepass-test-token',
+  SUREPASS_METADATA_RETRIES: '0',
+  SUREPASS_VERIFY_RETRIES: '0',
+  RAZORPAY_BASE_URL: 'https://api.razorpay.test',
+  RAZORPAY_KEY_ID: 'rzp_test_integration',
+  RAZORPAY_KEY_SECRET: 'rzp-integration-secret',
+  RAZORPAY_WEBHOOK_SECRET: 'rzp-integration-webhook-secret',
+  OTP_PROVIDER: 'mock',
+  OTP_MOCK_CODE: '654321',
+  SMART_CONTRACT_PROVIDER: 'http',
+  SMART_CONTRACT_API_URL: 'https://contracts.test',
+  SMART_CONTRACT_API_KEY: 'sc-test-key',
+  SMART_CONTRACT_INLINE_SUBMIT: 'true',
+  JOBS_ENABLED: 'false',
+});

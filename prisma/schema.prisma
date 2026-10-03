@@ -1,0 +1,420 @@
+// BhoomiScan Land Verification - PostgreSQL schema.
+//
+//   User
+//    ├── Subscriptions ── Payments
+//    ├── LandVerifications (one tracked parcel per user + locator)
+//    │     ├── LandRecordSnapshots   (append-only history, JSONB raw + normalized)
+//    │     ├── LandRecordChanges     (diff between consecutive snapshots)
+//    │     ├── SmartContractRecords  (one per snapshot, retried asynchronously)
+//    │     └── Alerts
+//    └── Alerts
+//
+// Money is stored in the smallest currency unit (paise) as integers.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/* ------------------------------------------------------------------ */
+/* Enums                                                              */
+/* ------------------------------------------------------------------ */
+
+enum UserRole {
+  USER
+  ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  BLOCKED
+}
+
+enum PlanInterval {
+  MONTHLY
+  QUARTERLY
+}
+
+enum SubscriptionStatus {
+  PENDING
+  ACTIVE
+  EXPIRED
+  CANCELLED
+  FAILED
+}
+
+enum PaymentStatus {
+  CREATED
+  SUCCESS
+  FAILED
+  REFUNDED
+}
+
+enum VerificationFrequency {
+  WEEKLY
+  MONTHLY
+  QUARTERLY
+}
+
+enum LandVerificationStatus {
+  PENDING // created, first fetch not completed yet
+  VERIFIED // first snapshot stored (nothing to compare against)
+  UNCHANGED // latest snapshot equals the previous one
+  CHANGED // latest snapshot differs from the previous one
+  FAILED // latest fetch attempt failed (history is kept)
+}
+
+enum SnapshotStatus {
+  INITIAL
+  UNCHANGED
+  CHANGED
+}
+
+enum VerificationTrigger {
+  MANUAL
+  SCHEDULED
+}
+
+enum ChangeType {
+  ADD
+  REMOVE
+  UPDATE
+}
+
+enum SmartContractStatus {
+  PENDING
+  PROCESSING
+  STORED
+  ALREADY_STORED // same data hash was anchored earlier; reference reused
+  FAILED // will be retried (nextRetryAt)
+  PERMANENTLY_FAILED // retries exhausted or non-retryable error
+  SKIPPED // provider disabled
+}
+
+enum AlertType {
+  LAND_RECORD_CHANGED
+  VERIFICATION_FAILED
+  SMART_CONTRACT_FAILED
+}
+
+enum AlertSeverity {
+  INFO
+  WARNING
+  CRITICAL
+}
+
+enum AlertStatus {
+  UNREAD
+  READ
+}
+
+/* ------------------------------------------------------------------ */
+/* Users & auth                                                       */
+/* ------------------------------------------------------------------ */
+
+model User {
+  id          String     @id @default(uuid()) @db.Uuid
+  mobile      String     @unique // E.164, e.g. +917081002501
+  name        String?
+  email       String?
+  role        UserRole   @default(USER)
+  status      UserStatus @default(ACTIVE)
+  lastLoginAt DateTime?  @map("last_login_at")
+  createdAt   DateTime   @default(now()) @map("created_at")
+  updatedAt   DateTime   @updatedAt @map("updated_at")
+
+  subscriptions     Subscription[]
+  payments          Payment[]
+  landVerifications LandVerification[]
+  alerts            Alert[]
+  apiRequestLogs    ApiRequestLog[]
+
+  @@map("users")
+}
+
+/* ------------------------------------------------------------------ */
+/* Plans, subscriptions, payments                                     */
+/* ------------------------------------------------------------------ */
+
+model SubscriptionPlan {
+  id                 String                  @id @default(uuid()) @db.Uuid
+  code               String                  @unique // "monthly", "quarterly"
+  name               String
+  description        String?
+  amount             Int // paise
+  currency           String                  @default("INR") @db.VarChar(3)
+  interval           PlanInterval
+  durationMonths     Int                     @map("duration_months")
+  // Which recurring-verification frequencies a subscriber may configure.
+  allowedFrequencies VerificationFrequency[] @map("allowed_frequencies")
+  // Max parcels with recurring monitoring enabled at once (null = unlimited).
+  maxMonitoredLands  Int?                    @map("max_monitored_lands")
+  features           Json?
+  isActive           Boolean                 @default(true) @map("is_active")
+  sortOrder          Int                     @default(0) @map("sort_order")
+  createdAt          DateTime                @default(now()) @map("created_at")
+  updatedAt          DateTime                @updatedAt @map("updated_at")
+
+  subscriptions Subscription[]
+
+  @@map("subscription_plans")
+}
+
+model Subscription {
+  id          String             @id @default(uuid()) @db.Uuid
+  userId      String             @map("user_id") @db.Uuid
+  planId      String             @map("plan_id") @db.Uuid
+  status      SubscriptionStatus @default(PENDING)
+  // Price snapshot at purchase time (plan prices may change later).
+  amount      Int
+  currency    String             @db.VarChar(3)
+  startsAt    DateTime?          @map("starts_at")
+  endsAt      DateTime?          @map("ends_at")
+  activatedAt DateTime?          @map("activated_at")
+  cancelledAt DateTime?          @map("cancelled_at")
+  expiredAt   DateTime?          @map("expired_at")
+  createdAt   DateTime           @default(now()) @map("created_at")
+  updatedAt   DateTime           @updatedAt @map("updated_at")
+
+  user     User             @relation(fields: [userId], references: [id])
+  plan     SubscriptionPlan @relation(fields: [planId], references: [id])
+  payments Payment[]
+
+  @@index([userId, status])
+  @@index([status, endsAt])
+  @@map("subscriptions")
+}
+
+model Payment {
+  id                String        @id @default(uuid()) @db.Uuid
+  userId            String        @map("user_id") @db.Uuid
+  subscriptionId    String        @map("subscription_id") @db.Uuid
+  provider          String        @default("RAZORPAY")
+  receipt           String        @unique
+  providerOrderId   String        @unique @map("provider_order_id")
+  providerPaymentId String?       @unique @map("provider_payment_id")
+  amount            Int // paise
+  currency          String        @db.VarChar(3)
+  status            PaymentStatus @default(CREATED)
+  method            String?
+  failureReason     String?       @map("failure_reason")
+  // Sanitized provider entities (order / payment / refund) for audit.
+  providerData      Json?         @map("provider_data")
+  verifiedVia       String?       @map("verified_via") // "client_verify" | "webhook"
+  verifiedAt        DateTime?     @map("verified_at")
+  refundedAt        DateTime?     @map("refunded_at")
+  createdAt         DateTime      @default(now()) @map("created_at")
+  updatedAt         DateTime      @updatedAt @map("updated_at")
+
+  user         User         @relation(fields: [userId], references: [id])
+  subscription Subscription @relation(fields: [subscriptionId], references: [id])
+
+  @@index([userId, createdAt])
+  @@index([subscriptionId])
+  @@map("payments")
+}
+
+// Webhook idempotency + audit trail (Razorpay retries deliveries).
+model PaymentWebhookEvent {
+  id          String    @id @default(uuid()) @db.Uuid
+  provider    String    @default("RAZORPAY")
+  eventId     String    @map("event_id")
+  eventType   String    @map("event_type")
+  payload     Json
+  processedAt DateTime? @map("processed_at")
+  result      String?
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  @@unique([provider, eventId])
+  @@map("payment_webhook_events")
+}
+
+/* ------------------------------------------------------------------ */
+/* Land verification                                                  */
+/* ------------------------------------------------------------------ */
+
+// One tracked land parcel for a user. `parcelKey` is a deterministic hash of the
+// normalized locator (state + district + tehsil + village + year + khasra), so the
+// same parcel always maps to the same row and history accumulates under it.
+model LandVerification {
+  id                    String                 @id @default(uuid()) @db.Uuid
+  userId                String                 @map("user_id") @db.Uuid
+  stateCode             String                 @map("state_code") // "PUNJAB"
+  provider              String // "SUREPASS"
+  parcelKey             String                 @map("parcel_key")
+  // Provider-agnostic locator as submitted (validated), e.g. { district, tehsil, village, year, khasra_number }.
+  locator               Json
+  displayName           String?                @map("display_name")
+  status                LandVerificationStatus @default(PENDING)
+  latestSnapshotId      String?                @map("latest_snapshot_id") @db.Uuid
+  verificationCount     Int                    @default(0) @map("verification_count")
+  changeCount           Int                    @default(0) @map("change_count")
+  firstVerifiedAt       DateTime?              @map("first_verified_at")
+  lastVerifiedAt        DateTime?              @map("last_verified_at")
+  lastAttemptAt         DateTime?              @map("last_attempt_at")
+  lastErrorCode         String?                @map("last_error_code")
+  lastErrorMessage      String?                @map("last_error_message")
+  consecutiveFailures   Int                    @default(0) @map("consecutive_failures")
+  // Recurring verification schedule (generic for WEEKLY / MONTHLY / QUARTERLY).
+  monitoringEnabled     Boolean                @default(false) @map("monitoring_enabled")
+  verificationFrequency VerificationFrequency? @map("verification_frequency")
+  nextVerificationAt    DateTime?              @map("next_verification_at")
+  // Job claim lease, so several workers never verify the same parcel at once.
+  lockedUntil           DateTime?              @map("locked_until")
+  createdAt             DateTime               @default(now()) @map("created_at")
+  updatedAt             DateTime               @updatedAt @map("updated_at")
+
+  user                 User                  @relation(fields: [userId], references: [id])
+  snapshots            LandRecordSnapshot[]
+  changes              LandRecordChange[]
+  smartContractRecords SmartContractRecord[]
+  alerts               Alert[]
+
+  @@unique([userId, stateCode, parcelKey])
+  @@index([monitoringEnabled, nextVerificationAt])
+  @@map("land_verifications")
+}
+
+// Append-only history: rows are never updated or deleted after insert.
+model LandRecordSnapshot {
+  id                 String              @id @default(uuid()) @db.Uuid
+  landVerificationId String              @map("land_verification_id") @db.Uuid
+  sequence           Int // 1, 2, 3 ... per land verification
+  provider           String
+  providerReference  String?             @map("provider_reference") // e.g. Surepass client_id
+  providerRequestId  String?             @map("provider_request_id")
+  rawResponse        Json                @map("raw_response")
+  normalizedData     Json                @map("normalized_data")
+  normalizerVersion  String              @map("normalizer_version")
+  hash               String // sha256 of canonical normalized data (0x-prefixed)
+  status             SnapshotStatus
+  trigger            VerificationTrigger @default(MANUAL)
+  previousSnapshotId String?             @map("previous_snapshot_id") @db.Uuid
+  changeCount        Int                 @default(0) @map("change_count")
+  verifiedAt         DateTime            @map("verified_at")
+  createdAt          DateTime            @default(now()) @map("created_at")
+
+  landVerification    LandVerification     @relation(fields: [landVerificationId], references: [id])
+  changes             LandRecordChange[]   @relation("SnapshotChanges")
+  smartContractRecord SmartContractRecord?
+
+  @@unique([landVerificationId, sequence])
+  @@index([landVerificationId, verifiedAt])
+  @@index([hash])
+  @@map("land_record_snapshots")
+}
+
+model LandRecordChange {
+  id                 String     @id @default(uuid()) @db.Uuid
+  landVerificationId String     @map("land_verification_id") @db.Uuid
+  snapshotId         String     @map("snapshot_id") @db.Uuid
+  previousSnapshotId String     @map("previous_snapshot_id") @db.Uuid
+  type               ChangeType
+  field              String // dotted path, e.g. "owners[name=abc].share"
+  oldValue           Json?      @map("old_value")
+  newValue           Json?      @map("new_value")
+  isCritical         Boolean    @default(false) @map("is_critical")
+  createdAt          DateTime   @default(now()) @map("created_at")
+
+  landVerification LandVerification   @relation(fields: [landVerificationId], references: [id])
+  snapshot         LandRecordSnapshot @relation("SnapshotChanges", fields: [snapshotId], references: [id])
+
+  @@index([landVerificationId, createdAt])
+  @@index([snapshotId])
+  @@map("land_record_changes")
+}
+
+/* ------------------------------------------------------------------ */
+/* Smart contract anchoring                                           */
+/* ------------------------------------------------------------------ */
+
+model SmartContractRecord {
+  id                 String              @id @default(uuid()) @db.Uuid
+  landVerificationId String              @map("land_verification_id") @db.Uuid
+  snapshotId         String              @unique @map("snapshot_id") @db.Uuid
+  provider           String // "HTTP" | "BSC" | "DISABLED"
+  dataHash           String              @map("data_hash")
+  propertyId         String              @map("property_id")
+  status             SmartContractStatus @default(PENDING)
+  requestReference   String?             @map("request_reference") // idempotency key sent to provider
+  externalReference  String?             @map("external_reference") // provider record id / on-chain verification id
+  transactionHash    String?             @map("transaction_hash")
+  network            String?
+  contractAddress    String?             @map("contract_address")
+  blockNumber        Int?                @map("block_number")
+  response           Json?
+  errorCode          String?             @map("error_code")
+  errorMessage       String?             @map("error_message")
+  attempts           Int                 @default(0)
+  maxAttempts        Int                 @default(8) @map("max_attempts")
+  nextRetryAt        DateTime?           @map("next_retry_at")
+  lastAttemptAt      DateTime?           @map("last_attempt_at")
+  lockedUntil        DateTime?           @map("locked_until")
+  storedAt           DateTime?           @map("stored_at")
+  createdAt          DateTime            @default(now()) @map("created_at")
+  updatedAt          DateTime            @updatedAt @map("updated_at")
+
+  landVerification LandVerification   @relation(fields: [landVerificationId], references: [id])
+  snapshot         LandRecordSnapshot @relation(fields: [snapshotId], references: [id])
+
+  @@index([status, nextRetryAt])
+  @@index([dataHash])
+  @@index([landVerificationId])
+  @@map("smart_contract_records")
+}
+
+/* ------------------------------------------------------------------ */
+/* Alerts & logs                                                      */
+/* ------------------------------------------------------------------ */
+
+model Alert {
+  id                 String        @id @default(uuid()) @db.Uuid
+  userId             String        @map("user_id") @db.Uuid
+  landVerificationId String?       @map("land_verification_id") @db.Uuid
+  snapshotId         String?       @map("snapshot_id") @db.Uuid
+  type               AlertType
+  severity           AlertSeverity @default(INFO)
+  title              String
+  message            String
+  data               Json?
+  status             AlertStatus   @default(UNREAD)
+  readAt             DateTime?     @map("read_at")
+  createdAt          DateTime      @default(now()) @map("created_at")
+
+  user             User              @relation(fields: [userId], references: [id])
+  landVerification LandVerification? @relation(fields: [landVerificationId], references: [id])
+
+  @@index([userId, status, createdAt])
+  @@map("alerts")
+}
+
+// Outbound calls to third parties (sanitized: no tokens, OTPs or secrets).
+model ApiRequestLog {
+  id                String   @id @default(uuid()) @db.Uuid
+  userId            String?  @map("user_id") @db.Uuid
+  requestId         String?  @map("request_id") // our inbound x-request-id
+  provider          String // SUREPASS | RAZORPAY | MSG91 | SMART_CONTRACT
+  operation         String
+  method            String
+  endpoint          String // path only, never the host credentials / query secrets
+  requestBody       Json?    @map("request_body")
+  responseStatus    Int?     @map("response_status")
+  responseBody      Json?    @map("response_body")
+  providerReference String?  @map("provider_reference")
+  success           Boolean
+  errorCode         String?  @map("error_code")
+  errorMessage      String?  @map("error_message")
+  durationMs        Int      @map("duration_ms")
+  attempt           Int      @default(1)
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([provider, createdAt])
+  @@index([userId, createdAt])
+  @@map("api_request_logs")
+}

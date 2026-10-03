@@ -1,0 +1,184 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>MSG91 OTP Test</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 560px; margin: 40px auto; padding: 0 16px; color: #222; }
+  h1 { font-size: 20px; }
+  label { display: block; margin-top: 16px; font-weight: 600; }
+  input { width: 100%; padding: 10px; font-size: 16px; margin-top: 6px; box-sizing: border-box; }
+  button { padding: 10px 16px; font-size: 15px; margin: 12px 8px 0 0; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  #status { margin-top: 16px; padding: 10px; background: #f3f3f3; border-radius: 6px; }
+  #log { margin-top: 12px; padding: 10px; background: #111; color: #9f9; font: 13px/1.5 monospace; white-space: pre-wrap; min-height: 160px; border-radius: 6px; }
+  small { color: #666; }
+</style>
+</head>
+<body>
+<h1>MSG91 OTP delivery test (widget API)</h1>
+<small>Standalone page to check whether this MSG91 account can actually deliver an OTP. It is not part of the backend flow.</small>
+
+<div id="status">Loading MSG91 script…</div>
+
+<label>Mobile (country code + number, no +)
+  <input id="mobile" value="917081002501" inputmode="numeric" />
+</label>
+<button id="sendBtn" disabled>Send OTP</button>
+<button id="retryBtn" disabled>Resend OTP</button>
+
+<label>OTP received
+  <input id="otp" inputmode="numeric" maxlength="8" />
+</label>
+<button id="verifyBtn" disabled>Verify OTP</button>
+
+<div id="log"></div>
+
+<script>
+  // Set to false to let MSG91 render its own popup UI instead of the manual buttons above.
+  var USE_MANUAL_METHODS = true;
+
+  var logEl = document.getElementById('log');
+  var statusEl = document.getElementById('status');
+  function log(label, data) {
+    var line = new Date().toLocaleTimeString() + '  ' + label + '  ' +
+      (typeof data === 'string' ? data : JSON.stringify(data, null, 2));
+    logEl.textContent += line + '\n';
+    console.log(label, data);
+  }
+  function setReady(ready) {
+    ['sendBtn', 'retryBtn', 'verifyBtn'].forEach(function (id) {
+      document.getElementById(id).disabled = !ready;
+    });
+  }
+
+  var configuration = {
+    widgetId: '36696a726742343833383133',
+    tokenAuth: '569891T5uZEH7S4qlm6ab77bc0P1',
+    exposeMethods: USE_MANUAL_METHODS,
+    success: function (data) {
+      // Fired by the popup UI flow after a successful verification.
+      log('WIDGET SUCCESS', data);
+      statusEl.textContent = 'OTP verified by MSG91. Delivery works on this account.';
+    },
+    failure: function (error) {
+      log('WIDGET FAILURE', error);
+      statusEl.textContent = 'MSG91 reported a failure. See log.';
+    }
+  };
+
+  document.getElementById('sendBtn').onclick = function () {
+    var mobile = document.getElementById('mobile').value.replace(/\D/g, '');
+    if (!/^\d{10,15}$/.test(mobile)) { log('INPUT', 'Enter the number with country code, e.g. 917081002501'); return; }
+    statusEl.textContent = 'Sending OTP to ' + mobile + '…';
+    window.sendOtp(
+      mobile,
+      function (data) { log('SEND OK', data); statusEl.textContent = 'MSG91 accepted the request. Wait for the SMS.'; },
+      function (err) { log('SEND FAILED', err); statusEl.textContent = 'Send failed. See log.'; }
+    );
+  };
+
+  document.getElementById('retryBtn').onclick = function () {
+    window.retryOtp(
+      null,
+      function (data) { log('RETRY OK', data); },
+      function (err) { log('RETRY FAILED', err); }
+    );
+  };
+
+  document.getElementById('verifyBtn').onclick = function () {
+    var otp = document.getElementById('otp').value.trim();
+    if (!otp) { log('INPUT', 'Enter the OTP first'); return; }
+    window.verifyOtp(
+      otp,
+      function (data) { log('VERIFY OK', data); statusEl.textContent = 'OTP verified. MSG91 delivery works on this account.'; },
+      function (err) { log('VERIFY FAILED', err); statusEl.textContent = 'Verification failed. See log.'; }
+    );
+  };
+
+  (function loadOtpScript(urls) {
+    var i = 0;
+    function attempt() {
+      var s = document.createElement('script');
+      s.src = urls[i];
+      s.async = true;
+      s.onload = function () {
+        if (typeof window.initSendOTP !== 'function') {
+          log('LOAD', 'Script loaded but initSendOTP is missing');
+          return;
+        }
+        window.initSendOTP(configuration);
+        log('LOAD', 'MSG91 widget initialised from ' + urls[i]);
+        if (USE_MANUAL_METHODS) {
+          // Exposed methods appear shortly after init.
+          var tries = 0;
+          var wait = setInterval(function () {
+            tries++;
+            if (typeof window.sendOtp === 'function') {
+              clearInterval(wait);
+              setReady(true);
+              statusEl.textContent = 'Ready. Enter the mobile number and press Send OTP.';
+            } else if (tries > 50) {
+              clearInterval(wait);
+              statusEl.textContent = 'Widget loaded but sendOtp was not exposed. Check widgetId / tokenAuth in the MSG91 panel.';
+            }
+          }, 200);
+        } else {
+          statusEl.textContent = 'MSG91 popup should be visible.';
+        }
+      };
+      s.onerror = function () {
+        log('LOAD', 'Failed to load ' + urls[i]);
+        i++;
+        if (i < urls.length) { attempt(); } else { statusEl.textContent = 'Could not load the MSG91 script.'; }
+      };
+      document.head.appendChild(s);
+    }
+    attempt();
+  })([
+    'https://verify.msg91.com/otp-provider.js',
+    'https://verify.phone91.com/otp-provider.js'
+  ]);
+</script>
+<!-- Code injected by live-server -->
+<script>
+	// <![CDATA[  <-- For SVG support
+	if ('WebSocket' in window) {
+		(function () {
+			function refreshCSS() {
+				var sheets = [].slice.call(document.getElementsByTagName("link"));
+				var head = document.getElementsByTagName("head")[0];
+				for (var i = 0; i < sheets.length; ++i) {
+					var elem = sheets[i];
+					var parent = elem.parentElement || head;
+					parent.removeChild(elem);
+					var rel = elem.rel;
+					if (elem.href && typeof rel != "string" || rel.length == 0 || rel.toLowerCase() == "stylesheet") {
+						var url = elem.href.replace(/(&|\?)_cacheOverride=\d+/, '');
+						elem.href = url + (url.indexOf('?') >= 0 ? '&' : '?') + '_cacheOverride=' + (new Date().valueOf());
+					}
+					parent.appendChild(elem);
+				}
+			}
+			var protocol = window.location.protocol === 'http:' ? 'ws://' : 'wss://';
+			var address = protocol + window.location.host + window.location.pathname + '/ws';
+			var socket = new WebSocket(address);
+			socket.onmessage = function (msg) {
+				if (msg.data == 'reload') window.location.reload();
+				else if (msg.data == 'refreshcss') refreshCSS();
+			};
+			if (sessionStorage && !sessionStorage.getItem('IsThisFirstTime_Log_From_LiveServer')) {
+				console.log('Live reload enabled.');
+				sessionStorage.setItem('IsThisFirstTime_Log_From_LiveServer', true);
+			}
+		})();
+	}
+	else {
+		console.error('Upgrade your browser. This Browser is NOT supported WebSocket for Live-Reloading.');
+	}
+	// ]]>
+</script>
+</body>
+</html>

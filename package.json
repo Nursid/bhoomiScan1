@@ -1,0 +1,48 @@
+{
+  "name": "bhoomiscan-api",
+  "version": "1.0.0",
+  "private": true,
+  "description": "BhoomiScan Land Verification API: OTP login, Razorpay subscriptions, Surepass land records, snapshot diffing and smart-contract anchoring.",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "worker": "node src/jobs/worker.js",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:deploy": "prisma migrate deploy",
+    "db:seed": "node prisma/seed.js",
+    "test": "jest --runInBand",
+    "test:unit": "jest tests/unit",
+    "test:integration": "jest tests/integration --runInBand"
+  },
+  "prisma": {
+    "seed": "node prisma/seed.js"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.16.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^5.1.0",
+    "express-rate-limit": "^7.5.0",
+    "helmet": "^8.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "pino": "^9.7.0",
+    "pino-http": "^10.5.0",
+    "swagger-ui-express": "^5.0.1",
+    "yaml": "^2.8.0",
+    "zod": "^3.25.0"
+  },
+  "optionalDependencies": {
+    "ethers": "^6.15.0",
+    "ioredis": "^5.6.1"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "prisma": "^6.16.0",
+    "supertest": "^7.1.0"
+  }
+}

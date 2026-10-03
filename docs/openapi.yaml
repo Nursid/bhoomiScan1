@@ -1,0 +1,744 @@
+openapi: 3.0.3
+info:
+  title: BhoomiScan Land Verification API
+  version: 1.0.0
+  description: |
+    Backend API for land-record verification: mobile OTP login, Razorpay subscriptions,
+    Surepass-backed land records (Punjab), historical snapshots with change detection,
+    alerts, and smart-contract anchoring.
+
+    **Envelope.** Success: `{ "success": true, "data": ..., "meta"?: ... }`.
+    Error: `{ "success": false, "error": { "code", "message", "details"? }, "requestId" }`.
+
+    **Auth.** `Authorization: Bearer <token>` from `POST /auth/verify-otp`.
+servers:
+  - url: http://localhost:4000/api/v1
+tags:
+  - name: Auth
+  - name: Users
+  - name: Plans & Subscriptions
+  - name: Payments
+  - name: Land Verification
+  - name: Smart Contract
+  - name: Alerts
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    State:
+      name: state
+      in: path
+      required: true
+      schema: { type: string, example: punjab }
+      description: State slug. Supported states come from `GET /land-verification/states`.
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    Page:
+      name: page
+      in: query
+      schema: { type: integer, minimum: 1, default: 1 }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+  responses:
+    Error:
+      description: Error
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+  schemas:
+    Error:
+      type: object
+      properties:
+        success: { type: boolean, example: false }
+        error:
+          type: object
+          properties:
+            code: { type: string, example: VALIDATION_FAILED }
+            message: { type: string }
+            details: {}
+        requestId: { type: string }
+    Option:
+      type: object
+      properties:
+        value: { type: string, example: Amritsar }
+        label: { type: string, example: Amritsar }
+    MetadataResult:
+      type: object
+      properties:
+        state: { type: string }
+        level: { type: string, enum: [districts, tehsils, villages, years, khasras] }
+        filters: { type: object }
+        options: { type: array, items: { $ref: '#/components/schemas/Option' } }
+        count: { type: integer }
+        cached: { type: boolean }
+    Locator:
+      type: object
+      required: [district, tehsil, village, year, khasra_number]
+      additionalProperties: false
+      properties:
+        district: { type: string, example: amritsar }
+        tehsil: { type: string, example: ajnala }
+        village: { type: string, example: abu said }
+        year: { type: string, example: 2020 - 2021 }
+        khasra_number: { type: string, example: 14//6/2---1 }
+    User:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        mobile: { type: string, example: '+917081002501' }
+        name: { type: string, nullable: true }
+        email: { type: string, nullable: true }
+        role: { type: string, enum: [USER, ADMIN] }
+        createdAt: { type: string, format: date-time }
+        lastLoginAt: { type: string, format: date-time }
+    Plan:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string, example: monthly }
+        name: { type: string }
+        amount: { type: integer, description: Amount in paise, example: 59100 }
+        amountDisplay: { type: string, example: '591.00' }
+        currency: { type: string, example: INR }
+        interval: { type: string, enum: [MONTHLY, QUARTERLY] }
+        durationMonths: { type: integer }
+        allowedFrequencies: { type: array, items: { type: string, enum: [WEEKLY, MONTHLY, QUARTERLY] } }
+        maxMonitoredLands: { type: integer, nullable: true }
+    Subscription:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string, enum: [PENDING, ACTIVE, EXPIRED, CANCELLED, FAILED] }
+        plan: { $ref: '#/components/schemas/Plan' }
+        amount: { type: integer }
+        currency: { type: string }
+        startsAt: { type: string, format: date-time, nullable: true }
+        endsAt: { type: string, format: date-time, nullable: true }
+        isCurrent: { type: boolean }
+    Payment:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        subscriptionId: { type: string, format: uuid }
+        status: { type: string, enum: [CREATED, SUCCESS, FAILED, REFUNDED] }
+        amount: { type: integer }
+        currency: { type: string }
+        orderId: { type: string }
+        paymentId: { type: string, nullable: true }
+    Change:
+      type: object
+      properties:
+        type: { type: string, enum: [ADD, REMOVE, UPDATE] }
+        field: { type: string, example: 'owner_details[]' }
+        previousValue: { nullable: true }
+        currentValue: { nullable: true }
+        isCritical: { type: boolean }
+    SmartContractRecord:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        snapshotId: { type: string, format: uuid }
+        provider: { type: string, enum: [HTTP, BSC, DISABLED] }
+        status: { type: string, enum: [PENDING, PROCESSING, STORED, ALREADY_STORED, FAILED, PERMANENTLY_FAILED, SKIPPED] }
+        dataHash: { type: string }
+        reference: { type: string, nullable: true }
+        transactionHash: { type: string, nullable: true }
+        attempts: { type: integer }
+        nextRetryAt: { type: string, format: date-time, nullable: true }
+        errorCode: { type: string, nullable: true }
+    VerifyResult:
+      type: object
+      properties:
+        verificationId: { type: string, format: uuid }
+        status: { type: string, enum: [VERIFIED, UNCHANGED, CHANGED] }
+        snapshotStatus: { type: string, enum: [INITIAL, UNCHANGED, CHANGED] }
+        isFirstVerification: { type: boolean }
+        previousVerification: { type: string, format: uuid, nullable: true, description: Previous snapshot id }
+        currentVerification: { type: string, format: uuid, description: New snapshot id }
+        previousVerifiedAt: { type: string, format: date-time, nullable: true }
+        verifiedAt: { type: string, format: date-time }
+        sequence: { type: integer }
+        hash: { type: string, description: sha256 of the normalized record (0x-prefixed) }
+        changes: { type: array, items: { $ref: '#/components/schemas/Change' } }
+        changeSummary:
+          type: object
+          properties:
+            total: { type: integer }
+            added: { type: integer }
+            removed: { type: integer }
+            updated: { type: integer }
+            critical: { type: integer }
+        record: { type: object, description: Normalized land record }
+        source:
+          type: object
+          properties:
+            state: { type: string }
+            provider: { type: string }
+            reference: { type: string, nullable: true }
+        smartContract:
+          type: object
+          properties:
+            recordId: { type: string }
+            status: { type: string }
+            reference: { type: string, nullable: true }
+            transactionHash: { type: string, nullable: true }
+        alertId: { type: string, nullable: true }
+    Alert:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        type: { type: string, enum: [LAND_RECORD_CHANGED, VERIFICATION_FAILED, SMART_CONTRACT_FAILED] }
+        severity: { type: string, enum: [INFO, WARNING, CRITICAL] }
+        title: { type: string }
+        message: { type: string }
+        data: { type: object }
+        status: { type: string, enum: [UNREAD, READ] }
+        createdAt: { type: string, format: date-time }
+
+security:
+  - bearerAuth: []
+
+paths:
+  /auth/send-otp:
+    post:
+      tags: [Auth]
+      security: []
+      summary: Send a login OTP by SMS
+      description: Rate limited per mobile number and per IP.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mobile]
+              properties:
+                mobile: { type: string, example: '7081002501' }
+      responses:
+        '200':
+          description: OTP sent
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      mobile: { type: string }
+                      channel: { type: string }
+                      expiresInSeconds: { type: integer }
+        '422': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
+        '502': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+
+  /auth/verify-otp:
+    post:
+      tags: [Auth]
+      security: []
+      summary: Verify OTP, register on first login, issue JWT
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mobile, otp]
+              properties:
+                mobile: { type: string, example: '+917081002501' }
+                otp: { type: string, example: '123456' }
+                reqId: { type: string, description: Only for the MSG91 OTP widget flow }
+                name: { type: string }
+      responses:
+        '200':
+          description: Logged in
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      token: { type: string }
+                      tokenType: { type: string, example: Bearer }
+                      expiresAt: { type: string, format: date-time }
+                      isNewUser: { type: boolean }
+                      user: { $ref: '#/components/schemas/User' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
+
+  /users/me:
+    get:
+      tags: [Users]
+      summary: Current user and active subscription
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Error' }
+    patch:
+      tags: [Users]
+      summary: Update name / email
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                email: { type: string, format: email, nullable: true }
+      responses:
+        '200': { description: OK }
+        '422': { $ref: '#/components/responses/Error' }
+
+  /plans:
+    get:
+      tags: [Plans & Subscriptions]
+      security: []
+      summary: List active plans
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      plans: { type: array, items: { $ref: '#/components/schemas/Plan' } }
+
+  /subscriptions/create:
+    post:
+      tags: [Plans & Subscriptions]
+      summary: Create a PENDING subscription (idempotent per plan while unpaid)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [planCode]
+              properties:
+                planCode: { type: string, enum: [monthly, quarterly] }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      subscription: { $ref: '#/components/schemas/Subscription' }
+                      reused: { type: boolean }
+        '200': { description: Existing unpaid subscription returned }
+        '404': { $ref: '#/components/responses/Error' }
+
+  /subscriptions:
+    get:
+      tags: [Plans & Subscriptions]
+      summary: Subscription history
+      responses:
+        '200': { description: OK }
+
+  /subscriptions/current:
+    get:
+      tags: [Plans & Subscriptions]
+      summary: Active subscription and upcoming (prepaid) periods
+      responses:
+        '200': { description: OK }
+
+  /subscriptions/{id}/cancel:
+    post:
+      tags: [Plans & Subscriptions]
+      summary: Cancel an unpaid subscription
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200': { description: Cancelled }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+
+  /payments/create:
+    post:
+      tags: [Payments]
+      summary: Create a Razorpay order for a PENDING subscription
+      description: Amount and currency come from the stored subscription, never from the client.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [subscriptionId]
+              properties:
+                subscriptionId: { type: string, format: uuid }
+      responses:
+        '201':
+          description: Order created; open Razorpay Checkout with `checkout`
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      payment: { $ref: '#/components/schemas/Payment' }
+                      checkout:
+                        type: object
+                        properties:
+                          keyId: { type: string }
+                          orderId: { type: string }
+                          amount: { type: integer }
+                          currency: { type: string }
+                          name: { type: string }
+                          description: { type: string }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+        '502': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+
+  /payments/verify:
+    post:
+      tags: [Payments]
+      summary: Verify Checkout result and activate the subscription
+      description: |
+        Checks the Checkout signature, then fetches the payment from Razorpay and checks
+        order id, amount, currency and status (captures `authorized` payments) before activating.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [razorpay_order_id, razorpay_payment_id, razorpay_signature]
+              properties:
+                razorpay_order_id: { type: string }
+                razorpay_payment_id: { type: string }
+                razorpay_signature: { type: string }
+      responses:
+        '200': { description: Payment SUCCESS, subscription ACTIVE }
+        '400': { $ref: '#/components/responses/Error' }
+        '402': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+
+  /payments/webhook:
+    post:
+      tags: [Payments]
+      security: []
+      summary: Razorpay webhook
+      description: |
+        Verified with `x-razorpay-signature` (HMAC-SHA256 of the raw body with the webhook secret),
+        idempotent on `x-razorpay-event-id`. Handles payment.captured, order.paid, payment.authorized,
+        payment.failed, refund.processed, payment.refunded.
+      parameters:
+        - { name: x-razorpay-signature, in: header, required: true, schema: { type: string } }
+        - { name: x-razorpay-event-id, in: header, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        '200': { description: Processed / duplicate / ignored }
+        '401': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+
+  /payments:
+    get:
+      tags: [Payments]
+      summary: Payment history
+      responses:
+        '200': { description: OK }
+
+  /land-verification/states:
+    get:
+      tags: [Land Verification]
+      summary: Supported states and their providers
+      responses:
+        '200': { description: OK }
+
+  /land-verification/{state}/districts:
+    get:
+      tags: [Land Verification]
+      summary: District list (requires active subscription; cached)
+      parameters: [{ $ref: '#/components/parameters/State' }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data: { $ref: '#/components/schemas/MetadataResult' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+        '504': { $ref: '#/components/responses/Error' }
+
+  /land-verification/{state}/tehsils:
+    post:
+      tags: [Land Verification]
+      summary: Tehsil list
+      parameters: [{ $ref: '#/components/parameters/State' }]
+      requestBody:
+        content:
+          application/json:
+            schema: { type: object, required: [district], properties: { district: { type: string, example: amritsar } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: object, properties: { data: { $ref: '#/components/schemas/MetadataResult' } } } } } }
+        '422': { $ref: '#/components/responses/Error' }
+
+  /land-verification/{state}/villages:
+    post:
+      tags: [Land Verification]
+      summary: Village list
+      parameters: [{ $ref: '#/components/parameters/State' }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [district, tehsil]
+              properties: { district: { type: string, example: amritsar }, tehsil: { type: string, example: ajnala } }
+      responses:
+        '200': { description: OK }
+        '422': { $ref: '#/components/responses/Error' }
+
+  /land-verification/{state}/years:
+    post:
+      tags: [Land Verification]
+      summary: Year list
+      parameters: [{ $ref: '#/components/parameters/State' }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [district, tehsil, village]
+              properties:
+                district: { type: string, example: amritsar }
+                tehsil: { type: string, example: ajnala }
+                village: { type: string, example: abu said }
+      responses:
+        '200': { description: OK }
+        '422': { $ref: '#/components/responses/Error' }
+
+  /land-verification/{state}/khasras:
+    post:
+      tags: [Land Verification]
+      summary: Khasra number list
+      parameters: [{ $ref: '#/components/parameters/State' }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [district, tehsil, village, year]
+              properties:
+                district: { type: string, example: amritsar }
+                tehsil: { type: string, example: ajnala }
+                village: { type: string, example: abu said }
+                year: { type: string, example: 2020 - 2021 }
+      responses:
+        '200': { description: OK }
+        '422': { $ref: '#/components/responses/Error' }
+
+  /land-verification/{state}/verify:
+    post:
+      tags: [Land Verification]
+      summary: Verify a land record (stores snapshot, compares with previous, anchors)
+      parameters: [{ $ref: '#/components/parameters/State' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Locator' }
+      responses:
+        '200':
+          description: Verified
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data: { $ref: '#/components/schemas/VerifyResult' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
+        '502': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+        '504': { $ref: '#/components/responses/Error' }
+
+  /land-verification:
+    get:
+      tags: [Land Verification]
+      summary: My tracked land records
+      parameters: [{ $ref: '#/components/parameters/Page' }, { $ref: '#/components/parameters/Limit' }]
+      responses:
+        '200': { description: OK }
+
+  /land-verification/{id}:
+    get:
+      tags: [Land Verification]
+      summary: Land verification with latest snapshot and its changes
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200': { description: OK }
+        '404': { $ref: '#/components/responses/Error' }
+
+  /land-verification/{id}/history:
+    get:
+      tags: [Land Verification]
+      summary: Snapshot history (newest first, without raw responses)
+      parameters: [{ $ref: '#/components/parameters/Id' }, { $ref: '#/components/parameters/Page' }, { $ref: '#/components/parameters/Limit' }]
+      responses:
+        '200': { description: OK }
+        '404': { $ref: '#/components/responses/Error' }
+
+  /land-verification/{id}/history/{snapshotId}:
+    get:
+      tags: [Land Verification]
+      summary: One snapshot including the raw provider response and its changes
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - { name: snapshotId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: OK }
+        '404': { $ref: '#/components/responses/Error' }
+
+  /land-verification/{id}/changes:
+    get:
+      tags: [Land Verification]
+      summary: Change history
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - { $ref: '#/components/parameters/Page' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { name: snapshotId, in: query, schema: { type: string, format: uuid } }
+        - { name: critical, in: query, schema: { type: string, enum: ['true', 'false'] } }
+      responses:
+        '200': { description: OK }
+        '404': { $ref: '#/components/responses/Error' }
+
+  /land-verification/{id}/monitoring:
+    put:
+      tags: [Land Verification]
+      summary: Configure recurring verification (WEEKLY / MONTHLY / QUARTERLY)
+      description: Enabling requires an active subscription whose plan allows the frequency; disabling never does.
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled]
+              properties:
+                enabled: { type: boolean }
+                frequency: { type: string, enum: [WEEKLY, MONTHLY, QUARTERLY] }
+      responses:
+        '200': { description: OK }
+        '403': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+
+  /smart-contract/records:
+    get:
+      tags: [Smart Contract]
+      summary: Anchoring records of a land verification
+      parameters:
+        - { name: landVerificationId, in: query, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      records: { type: array, items: { $ref: '#/components/schemas/SmartContractRecord' } }
+
+  /smart-contract/records/{id}:
+    get:
+      tags: [Smart Contract]
+      summary: One anchoring record
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200': { description: OK }
+        '404': { $ref: '#/components/responses/Error' }
+
+  /smart-contract/records/{id}/retry:
+    post:
+      tags: [Smart Contract]
+      summary: Retry a FAILED / PERMANENTLY_FAILED record now
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200': { description: Result of the retry }
+        '409': { $ref: '#/components/responses/Error' }
+
+  /alerts:
+    get:
+      tags: [Alerts]
+      summary: My alerts
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [UNREAD, READ] } }
+        - { name: landVerificationId, in: query, schema: { type: string, format: uuid } }
+        - { $ref: '#/components/parameters/Page' }
+        - { $ref: '#/components/parameters/Limit' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      alerts: { type: array, items: { $ref: '#/components/schemas/Alert' } }
+                      unread: { type: integer }
+
+  /alerts/{id}/read:
+    patch:
+      tags: [Alerts]
+      summary: Mark one alert read
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200': { description: OK }
+
+  /alerts/read-all:
+    post:
+      tags: [Alerts]
+      summary: Mark all alerts read
+      responses:
+        '200': { description: OK }
