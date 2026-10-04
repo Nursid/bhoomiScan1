@@ -8,6 +8,9 @@
 const path = require('path');
 const { z } = require('zod');
 
+// dotenv never overrides variables the platform already set (e.g. Catalyst AppSail
+// console variables); .env only fills in what is missing.
+const DATABASE_URL_FROM_PLATFORM = Boolean(process.env.DATABASE_URL);
 require('dotenv').config({ path: process.env.DOTENV_PATH || path.resolve(process.cwd(), '.env') });
 
 const bool = (fallback) =>
@@ -46,7 +49,13 @@ const url = (fallback) => str(fallback).transform((value) => value.replace(/\/+$
 
 const schema = z.object({
   NODE_ENV: oneOf(['development', 'test', 'production'], 'development'),
-  PORT: int(4000),
+  PORT: z
+  .preprocess(
+    () => process.env.X_ZOHO_CATALYST_LISTEN_PORT || process.env.PORT || '4000',
+    z.string()
+  )
+  .transform(Number)
+  .pipe(z.number().int().min(0)),
   HOST: str('0.0.0.0'),
   LOG_LEVEL: str('info'),
   CORS_ORIGINS: list(),
@@ -61,17 +70,13 @@ const schema = z.object({
   JWT_EXPIRES_IN: str('7d'),
   JWT_ISSUER: str('bhoomiscan-api'),
 
-  OTP_PROVIDER: oneOf(['msg91', 'mock'], 'mock'),
-  OTP_MOCK_CODE: str('123456'),
   MOBILE_DEFAULT_COUNTRY_CODE: str('91'),
-  MSG91_BASE_URL: url('https://control.msg91.com'),
-  MSG91_AUTH_KEY: str(''),
-  MSG91_OTP_TEMPLATE_ID: str(''),
-  MSG91_OTP_EXPIRY_MINUTES: int(5, { min: 1 }),
-  MSG91_OTP_LENGTH: int(6, { min: 4 }),
   MSG91_WIDGET_ID: str(''),
-  MSG91_WIDGET_TOKEN_AUTH: str(''),
+  MSG91_TOKEN_AUTH: str(''),
+  MSG91_AUTH_KEY: str(''),
+  MSG91_BASE_URL: url('https://control.msg91.com'),
   MSG91_TIMEOUT_MS: int(15000, { min: 1000 }),
+  MSG91_DEBUG_VERIFY_RESPONSE: bool(false),
 
   RAZORPAY_BASE_URL: url('https://api.razorpay.com'),
   RAZORPAY_KEY_ID: str(''),
@@ -109,7 +114,6 @@ const schema = z.object({
 
   RATE_LIMIT_WINDOW_SECONDS: int(60, { min: 1 }),
   RATE_LIMIT_GLOBAL_MAX: int(300, { min: 1 }),
-  RATE_LIMIT_OTP_SEND_MAX: int(5, { min: 1 }),
   RATE_LIMIT_OTP_VERIFY_MAX: int(10, { min: 1 }),
   RATE_LIMIT_LAND_VERIFY_MAX: int(20, { min: 1 }),
 });
@@ -126,9 +130,6 @@ const MIN_JWT_SECRET_LENGTH = 32;
 if (env.NODE_ENV === 'production') {
   if (env.JWT_SECRET.length < MIN_JWT_SECRET_LENGTH) {
     throw new Error(`JWT_SECRET must be at least ${MIN_JWT_SECRET_LENGTH} characters in production`);
-  }
-  if (env.OTP_PROVIDER === 'mock') {
-    throw new Error('OTP_PROVIDER=mock is not allowed in production');
   }
   if (!env.DATABASE_URL) {
     throw new Error('DATABASE_URL is required in production');
@@ -154,6 +155,7 @@ const config = {
   apiDocsEnabled: env.API_DOCS_ENABLED,
 
   databaseUrl: env.DATABASE_URL,
+  databaseUrlSource: DATABASE_URL_FROM_PLATFORM ? 'environment' : env.DATABASE_URL ? '.env file' : 'missing',
   redisUrl: env.REDIS_URL,
   metadataCacheTtlSeconds: env.METADATA_CACHE_TTL_SECONDS,
 
@@ -166,20 +168,16 @@ const config = {
   },
 
   otp: {
-    provider: env.OTP_PROVIDER,
-    mockCode: env.OTP_MOCK_CODE,
     defaultCountryCode: env.MOBILE_DEFAULT_COUNTRY_CODE.replace(/\D/g, '') || '91',
   },
 
   msg91: {
-    baseUrl: env.MSG91_BASE_URL,
-    authKey: env.MSG91_AUTH_KEY,
-    templateId: env.MSG91_OTP_TEMPLATE_ID,
-    otpExpiryMinutes: env.MSG91_OTP_EXPIRY_MINUTES,
-    otpLength: env.MSG91_OTP_LENGTH,
     widgetId: env.MSG91_WIDGET_ID,
-    widgetTokenAuth: env.MSG91_WIDGET_TOKEN_AUTH,
+    tokenAuth: env.MSG91_TOKEN_AUTH,
+    authKey: env.MSG91_AUTH_KEY,
+    baseUrl: env.MSG91_BASE_URL,
     timeoutMs: env.MSG91_TIMEOUT_MS,
+    debugResponses: env.MSG91_DEBUG_VERIFY_RESPONSE,
   },
 
   razorpay: {
@@ -231,7 +229,6 @@ const config = {
   rateLimit: {
     windowMs: env.RATE_LIMIT_WINDOW_SECONDS * 1000,
     globalMax: env.RATE_LIMIT_GLOBAL_MAX,
-    otpSendMax: env.RATE_LIMIT_OTP_SEND_MAX,
     otpVerifyMax: env.RATE_LIMIT_OTP_VERIFY_MAX,
     landVerifyMax: env.RATE_LIMIT_LAND_VERIFY_MAX,
   },

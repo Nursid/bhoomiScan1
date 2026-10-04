@@ -41,33 +41,55 @@ const sendWebhook = (app, payload, { eventId, signature } = {}) => {
 };
 
 describe('auth', () => {
-  test('send-otp, verify-otp, /users/me; wrong OTP and bad tokens are rejected', async () => {
+  const REQ_ID = '36697a704157303534313839';
+
+  test('POST /api/auth/mobile-verify verifies with MSG91 and returns { success, token, user }', async () => {
     const app = api();
-    const sent = await app.post('/api/v1/auth/send-otp').send({ mobile: '9876543210' });
-    expect(sent.status).toBe(200);
-    expect(sent.body.data.mobile).toBe('+919876543210');
+    const res = await app.post('/api/auth/mobile-verify').send({ mobile: '919876543210', otp: '654321', reqId: REQ_ID });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      success: true,
+      token: expect.any(String),
+      user: { id: expect.any(String), mobile: '+919876543210', loginMethod: 'mobile_otp', lastLoginAt: expect.any(String) },
+    });
 
-    const wrong = await app.post('/api/v1/auth/verify-otp').send({ mobile: '9876543210', otp: '000000' });
-    expect(wrong.status).toBe(401);
-    expect(wrong.body.error.code).toBe('INVALID_OTP');
+    const call = fake.callsTo(/msg91\.test\/api\/v5\/widget\/verifyOtp$/).pop();
+    expect(call.body).toEqual({ widgetId: 'widget-integration', reqId: REQ_ID, otp: '654321', tokenAuth: 'token-auth-integration' });
 
-    const { auth, user } = await login(app, '9876543210');
-    expect(user.mobile).toBe('+919876543210');
     const again = await login(app, '+91 98765 43210');
-    expect(again.user.id).toBe(user.id); // same user on second login
-
-    const me = await app.get('/api/v1/users/me').set(auth);
-    expect(me.status).toBe(200);
-    expect(me.body.data.activeSubscription).toBeNull();
-
-    expect((await app.get('/api/v1/users/me')).status).toBe(401);
-    expect((await app.get('/api/v1/users/me').set({ Authorization: 'Bearer nope' })).body.error.code).toBe('INVALID_TOKEN');
+    expect(again.user.id).toBe(res.body.user.id); // same user on second login
   });
 
-  test('validation errors are 422 with field details', async () => {
-    const res = await api().post('/api/v1/auth/verify-otp').send({ mobile: '12', otp: 'abc' });
-    expect(res.status).toBe(422);
-    expect(res.body.error.details.map((d) => d.field).sort()).toEqual(['mobile', 'otp']);
+  test('GET /api/auth/me returns the identity behind the token', async () => {
+    const app = api();
+    const { auth, user } = await login(app, '9876543210');
+    const me = await app.get('/api/auth/me').set(auth);
+    expect(me.status).toBe(200);
+    expect(me.body).toEqual({
+      success: true,
+      user: { id: user.id, mobile: '+919876543210', email: null, role: 'user', loginMethod: 'mobile_otp' },
+      expiresAt: expect.any(String),
+    });
+    expect((await app.get('/api/auth/me')).status).toBe(401);
+    expect((await app.get('/api/auth/me').set({ Authorization: 'Bearer nope' })).body.message).toBe('Invalid login token');
+  });
+
+  test('wrong OTP -> 401, bad input -> 400 with the reference messages', async () => {
+    const app = api();
+    const wrong = await app.post('/api/auth/mobile-verify').send({ mobile: '9876543210', otp: '000000', reqId: REQ_ID });
+    expect(wrong.status).toBe(401);
+    expect(wrong.body).toMatchObject({ success: false, message: 'Invalid or expired OTP' });
+
+    const cases = [
+      [{ mobile: '12', otp: '654321', reqId: REQ_ID }, 'Invalid mobile number'],
+      [{ mobile: '9876543210', otp: 'abc', reqId: REQ_ID }, 'Invalid OTP'],
+      [{ mobile: '9876543210', otp: '654321' }, 'reqId is required'],
+    ];
+    for (const [body, message] of cases) {
+      const res = await app.post('/api/auth/mobile-verify').send(body);
+      expect(res.status).toBe(400);
+      expect(res.body.message).toBe(message);
+    }
   });
 });
 

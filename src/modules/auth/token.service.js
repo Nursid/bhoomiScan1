@@ -16,7 +16,7 @@ const ensureConfigured = () => {
 
 const generateToken = (user) => {
   ensureConfigured();
-  const token = jwt.sign({ mobile: user.mobile, role: user.role }, config.jwt.secret, {
+  const token = jwt.sign({ mobile: user.mobile, role: user.role, loginMethod: user.loginMethod || undefined }, config.jwt.secret, {
     algorithm: 'HS256',
     subject: String(user.id),
     issuer: config.jwt.issuer,

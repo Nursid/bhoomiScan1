@@ -13,6 +13,10 @@
 
 generator client {
   provider = "prisma-client-js"
+  // "native" = this machine (local dev). Zoho Catalyst AppSail (node20) runs Debian with
+  // OpenSSL 1.1 and uses the uploaded node_modules as-is (it never re-runs `prisma generate`).
+  // debian-openssl-3.0.x is kept in case the AppSail image moves to OpenSSL 3.
+  binaryTargets = ["native", "debian-openssl-1.1.x", "debian-openssl-3.0.x"]
 }
 
 datasource db {

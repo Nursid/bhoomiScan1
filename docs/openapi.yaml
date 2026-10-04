@@ -10,9 +10,9 @@ info:
     **Envelope.** Success: `{ "success": true, "data": ..., "meta"?: ... }`.
     Error: `{ "success": false, "error": { "code", "message", "details"? }, "requestId" }`.
 
-    **Auth.** `Authorization: Bearer <token>` from `POST /auth/verify-otp`.
+    **Auth.** `Authorization: Bearer <token>` from `POST /api/auth/mobile-verify` (MSG91 OTP widget).
 servers:
-  - url: http://localhost:4000/api/v1
+  - url: http://localhost:4000
 tags:
   - name: Auth
   - name: Users
@@ -208,58 +208,26 @@ security:
   - bearerAuth: []
 
 paths:
-  /auth/send-otp:
+  /api/auth/mobile-verify:
     post:
       tags: [Auth]
       security: []
-      summary: Send a login OTP by SMS
-      description: Rate limited per mobile number and per IP.
+      summary: Verify the MSG91 widget OTP and get a login token
+      description: |
+        The app runs the MSG91 widget's sendOtp() and gets a reqId. The backend verifies the OTP
+        with MSG91 (widget verifyOtp), finds or creates the user, and issues a JWT.
+        Same API as the reference backend's server/mobileVerify.js.
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [mobile]
+              required: [mobile, otp, reqId]
               properties:
-                mobile: { type: string, example: '7081002501' }
-      responses:
-        '200':
-          description: OTP sent
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  success: { type: boolean }
-                  data:
-                    type: object
-                    properties:
-                      mobile: { type: string }
-                      channel: { type: string }
-                      expiresInSeconds: { type: integer }
-        '422': { $ref: '#/components/responses/Error' }
-        '429': { $ref: '#/components/responses/Error' }
-        '502': { $ref: '#/components/responses/Error' }
-        '503': { $ref: '#/components/responses/Error' }
-
-  /auth/verify-otp:
-    post:
-      tags: [Auth]
-      security: []
-      summary: Verify OTP, register on first login, issue JWT
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [mobile, otp]
-              properties:
-                mobile: { type: string, example: '+917081002501' }
-                otp: { type: string, example: '123456' }
-                reqId: { type: string, description: Only for the MSG91 OTP widget flow }
-                name: { type: string }
+                mobile: { type: string, example: '917081002501' }
+                otp: { type: string, example: '302348' }
+                reqId: { type: string, example: '36697a704157303534313839' }
       responses:
         '200':
           description: Logged in
@@ -268,21 +236,46 @@ paths:
               schema:
                 type: object
                 properties:
-                  success: { type: boolean }
-                  data:
+                  success: { type: boolean, example: true }
+                  token: { type: string }
+                  user:
                     type: object
                     properties:
-                      token: { type: string }
-                      tokenType: { type: string, example: Bearer }
-                      expiresAt: { type: string, format: date-time }
-                      isNewUser: { type: boolean }
-                      user: { $ref: '#/components/schemas/User' }
-        '401': { $ref: '#/components/responses/Error' }
-        '403': { $ref: '#/components/responses/Error' }
-        '422': { $ref: '#/components/responses/Error' }
-        '429': { $ref: '#/components/responses/Error' }
+                      id: { type: string, format: uuid }
+                      mobile: { type: string, example: '+917081002501' }
+                      loginMethod: { type: string, example: mobile_otp }
+                      lastLoginAt: { type: string, format: date-time }
+        '400': { description: 'Invalid mobile number / Invalid OTP / reqId is required' }
+        '401': { description: 'Invalid or expired OTP, or mobile does not match the OTP session' }
+        '429': { : '#/components/responses/Error' }
+        '502': { description: Unable to verify OTP with MSG91 }
+        '503': { description: Mobile OTP login is not configured on the server }
 
-  /users/me:
+  /api/auth/me:
+    get:
+      tags: [Auth]
+      summary: Identity behind a login token
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  user:
+                    type: object
+                    properties:
+                      id: { type: string, format: uuid }
+                      mobile: { type: string }
+                      email: { type: string, nullable: true }
+                      role: { type: string, example: user }
+                      loginMethod: { type: string, example: mobile_otp }
+                  expiresAt: { type: string, format: date-time }
+        '401': { : '#/components/responses/Error' }
+
+  /api/v1/users/me:
     get:
       tags: [Users]
       summary: Current user and active subscription
@@ -304,7 +297,7 @@ paths:
         '200': { description: OK }
         '422': { $ref: '#/components/responses/Error' }
 
-  /plans:
+  /api/v1/plans:
     get:
       tags: [Plans & Subscriptions]
       security: []
@@ -323,7 +316,7 @@ paths:
                     properties:
                       plans: { type: array, items: { $ref: '#/components/schemas/Plan' } }
 
-  /subscriptions/create:
+  /api/v1/subscriptions/create:
     post:
       tags: [Plans & Subscriptions]
       summary: Create a PENDING subscription (idempotent per plan while unpaid)
@@ -353,21 +346,21 @@ paths:
         '200': { description: Existing unpaid subscription returned }
         '404': { $ref: '#/components/responses/Error' }
 
-  /subscriptions:
+  /api/v1/subscriptions:
     get:
       tags: [Plans & Subscriptions]
       summary: Subscription history
       responses:
         '200': { description: OK }
 
-  /subscriptions/current:
+  /api/v1/subscriptions/current:
     get:
       tags: [Plans & Subscriptions]
       summary: Active subscription and upcoming (prepaid) periods
       responses:
         '200': { description: OK }
 
-  /subscriptions/{id}/cancel:
+  /api/v1/subscriptions/{id}/cancel:
     post:
       tags: [Plans & Subscriptions]
       summary: Cancel an unpaid subscription
@@ -377,7 +370,7 @@ paths:
         '404': { $ref: '#/components/responses/Error' }
         '409': { $ref: '#/components/responses/Error' }
 
-  /payments/create:
+  /api/v1/payments/create:
     post:
       tags: [Payments]
       summary: Create a Razorpay order for a PENDING subscription
@@ -418,7 +411,7 @@ paths:
         '502': { $ref: '#/components/responses/Error' }
         '503': { $ref: '#/components/responses/Error' }
 
-  /payments/verify:
+  /api/v1/payments/verify:
     post:
       tags: [Payments]
       summary: Verify Checkout result and activate the subscription
@@ -443,7 +436,7 @@ paths:
         '404': { $ref: '#/components/responses/Error' }
         '409': { $ref: '#/components/responses/Error' }
 
-  /payments/webhook:
+  /api/v1/payments/webhook:
     post:
       tags: [Payments]
       security: []
@@ -465,21 +458,21 @@ paths:
         '401': { $ref: '#/components/responses/Error' }
         '503': { $ref: '#/components/responses/Error' }
 
-  /payments:
+  /api/v1/payments:
     get:
       tags: [Payments]
       summary: Payment history
       responses:
         '200': { description: OK }
 
-  /land-verification/states:
+  /api/v1/land-verification/states:
     get:
       tags: [Land Verification]
       summary: Supported states and their providers
       responses:
         '200': { description: OK }
 
-  /land-verification/{state}/districts:
+  /api/v1/land-verification/{state}/districts:
     get:
       tags: [Land Verification]
       summary: District list (requires active subscription; cached)
@@ -500,7 +493,7 @@ paths:
         '503': { $ref: '#/components/responses/Error' }
         '504': { $ref: '#/components/responses/Error' }
 
-  /land-verification/{state}/tehsils:
+  /api/v1/land-verification/{state}/tehsils:
     post:
       tags: [Land Verification]
       summary: Tehsil list
@@ -513,7 +506,7 @@ paths:
         '200': { description: OK, content: { application/json: { schema: { type: object, properties: { data: { $ref: '#/components/schemas/MetadataResult' } } } } } }
         '422': { $ref: '#/components/responses/Error' }
 
-  /land-verification/{state}/villages:
+  /api/v1/land-verification/{state}/villages:
     post:
       tags: [Land Verification]
       summary: Village list
@@ -529,7 +522,7 @@ paths:
         '200': { description: OK }
         '422': { $ref: '#/components/responses/Error' }
 
-  /land-verification/{state}/years:
+  /api/v1/land-verification/{state}/years:
     post:
       tags: [Land Verification]
       summary: Year list
@@ -548,7 +541,7 @@ paths:
         '200': { description: OK }
         '422': { $ref: '#/components/responses/Error' }
 
-  /land-verification/{state}/khasras:
+  /api/v1/land-verification/{state}/khasras:
     post:
       tags: [Land Verification]
       summary: Khasra number list
@@ -568,7 +561,7 @@ paths:
         '200': { description: OK }
         '422': { $ref: '#/components/responses/Error' }
 
-  /land-verification/{state}/verify:
+  /api/v1/land-verification/{state}/verify:
     post:
       tags: [Land Verification]
       summary: Verify a land record (stores snapshot, compares with previous, anchors)
@@ -596,7 +589,7 @@ paths:
         '503': { $ref: '#/components/responses/Error' }
         '504': { $ref: '#/components/responses/Error' }
 
-  /land-verification:
+  /api/v1/land-verification:
     get:
       tags: [Land Verification]
       summary: My tracked land records
@@ -604,7 +597,7 @@ paths:
       responses:
         '200': { description: OK }
 
-  /land-verification/{id}:
+  /api/v1/land-verification/{id}:
     get:
       tags: [Land Verification]
       summary: Land verification with latest snapshot and its changes
@@ -613,7 +606,7 @@ paths:
         '200': { description: OK }
         '404': { $ref: '#/components/responses/Error' }
 
-  /land-verification/{id}/history:
+  /api/v1/land-verification/{id}/history:
     get:
       tags: [Land Verification]
       summary: Snapshot history (newest first, without raw responses)
@@ -622,7 +615,7 @@ paths:
         '200': { description: OK }
         '404': { $ref: '#/components/responses/Error' }
 
-  /land-verification/{id}/history/{snapshotId}:
+  /api/v1/land-verification/{id}/history/{snapshotId}:
     get:
       tags: [Land Verification]
       summary: One snapshot including the raw provider response and its changes
@@ -633,7 +626,7 @@ paths:
         '200': { description: OK }
         '404': { $ref: '#/components/responses/Error' }
 
-  /land-verification/{id}/changes:
+  /api/v1/land-verification/{id}/changes:
     get:
       tags: [Land Verification]
       summary: Change history
@@ -647,7 +640,7 @@ paths:
         '200': { description: OK }
         '404': { $ref: '#/components/responses/Error' }
 
-  /land-verification/{id}/monitoring:
+  /api/v1/land-verification/{id}/monitoring:
     put:
       tags: [Land Verification]
       summary: Configure recurring verification (WEEKLY / MONTHLY / QUARTERLY)
@@ -668,7 +661,7 @@ paths:
         '403': { $ref: '#/components/responses/Error' }
         '422': { $ref: '#/components/responses/Error' }
 
-  /smart-contract/records:
+  /api/v1/smart-contract/records:
     get:
       tags: [Smart Contract]
       summary: Anchoring records of a land verification
@@ -687,7 +680,7 @@ paths:
                     properties:
                       records: { type: array, items: { $ref: '#/components/schemas/SmartContractRecord' } }
 
-  /smart-contract/records/{id}:
+  /api/v1/smart-contract/records/{id}:
     get:
       tags: [Smart Contract]
       summary: One anchoring record
@@ -696,7 +689,7 @@ paths:
         '200': { description: OK }
         '404': { $ref: '#/components/responses/Error' }
 
-  /smart-contract/records/{id}/retry:
+  /api/v1/smart-contract/records/{id}/retry:
     post:
       tags: [Smart Contract]
       summary: Retry a FAILED / PERMANENTLY_FAILED record now
@@ -705,7 +698,7 @@ paths:
         '200': { description: Result of the retry }
         '409': { $ref: '#/components/responses/Error' }
 
-  /alerts:
+  /api/v1/alerts:
     get:
       tags: [Alerts]
       summary: My alerts
@@ -728,7 +721,7 @@ paths:
                       alerts: { type: array, items: { $ref: '#/components/schemas/Alert' } }
                       unread: { type: integer }
 
-  /alerts/{id}/read:
+  /api/v1/alerts/{id}/read:
     patch:
       tags: [Alerts]
       summary: Mark one alert read
@@ -736,7 +729,7 @@ paths:
       responses:
         '200': { description: OK }
 
-  /alerts/read-all:
+  /api/v1/alerts/read-all:
     post:
       tags: [Alerts]
       summary: Mark all alerts read

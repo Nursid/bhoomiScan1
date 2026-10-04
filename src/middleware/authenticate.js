@@ -1,6 +1,6 @@
 /**
  * `authenticate`: requires `Authorization: Bearer <jwt>`, loads the user and
- * rejects blocked/deleted accounts. Sets req.user = { id, mobile, role }.
+ * rejects blocked/deleted accounts. Sets req.user = { id, mobile, role } and req.auth = token claims.
  * `requireRole(role)`: must run after authenticate.
  */
 
@@ -26,6 +26,7 @@ const authenticate = async (req, res, next) => {
     throw forbidden('This account is blocked', 'ACCOUNT_BLOCKED');
   }
   req.user = { id: user.id, mobile: user.mobile, role: user.role };
+  req.auth = claims;
   requestContext.set({ userId: user.id });
   next();
 };

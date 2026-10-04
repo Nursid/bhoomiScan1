@@ -28,7 +28,7 @@ That project is a React Native app (TrustLedge / Destiny Protocol) with a backen
 |---|---|---|
 | `authTokens.js` | `modules/auth/token.service.js` | The subject is the DB user id (uuid), not the mobile number. The same HS256, issuer and minimum secret length are kept. |
 | `mobileVerify.normalizeMobile` | `utils/mobile.js` | Ported unchanged. |
-| `msg91Client.js` | `integrations/msg91/msg91.client.js` | Adds server-side send and verify (`/api/v5/otp`) for `POST /auth/send-otp`, keeps the widget `reqId` flow, and runs on the shared HTTP client. |
+| `mobileVerify.js` + `msg91Client.js` | `modules/auth/auth.service.js` + `integrations/msg91/msg91.client.js` | Same API (`POST /api/auth/mobile-verify`, `GET /api/auth/me`), same request, messages and response shape. The only difference is that the user is found or created in the `users` table, so `user.id` is a uuid. |
 | `razorpayClient.js` (fetch + Basic + HMAC) | `integrations/razorpay/razorpay.client.js` | Uses the Orders API (one-off monthly/quarterly payments) instead of recurring mandates, and adds the checkout signature check plus a server-side payment fetch. |
 | Webhook idempotency (`processedEvents`) | `payment_webhook_events` table | Unique key `(provider, event_id)`. An event that was stored but never processed is processed again. |
 | `landHasher.canonicalizeJson` | `utils/canonicalJson.js` | Same idea. The land-specific field mapping moved into the normalizer. |
@@ -194,8 +194,8 @@ moved to BullMQ later without changing the services. Redis is optional and is us
 
 | Method | Path | Access |
 |---|---|---|
-| POST | `/auth/send-otp` | public, rate-limited per mobile number and per IP |
-| POST | `/auth/verify-otp` | public, rate-limited |
+| POST | `/api/auth/mobile-verify` (not under `/api/v1`) | public, rate-limited per mobile number and per IP |
+| GET | `/api/auth/me` | auth |
 | GET / PATCH | `/users/me` | auth |
 | GET | `/plans` | public |
 | POST | `/subscriptions/create` | auth |
@@ -235,7 +235,7 @@ src/
     msg91/                        msg91.client.js
     smart-contract/               index.js (factory), http.provider.js, bsc.provider.js
   modules/
-    auth/                         routes, controller, service, validation, otp.provider, token.service
+    auth/                         routes, controller, service, token.service
     users/                        routes
     subscriptions/                routes (plans + subscriptions), service
     payments/                     routes, controller, service
@@ -253,8 +253,7 @@ tests/unit, tests/integration
 ## 7. Environment variables
 
 See `.env.example`, which documents every variable. Integrations whose credentials are missing stay disabled and
-return `503` instead of crashing. In production, startup **fails** if `JWT_SECRET` is shorter than 32 characters,
-if `OTP_PROVIDER=mock`, or if `DATABASE_URL` is missing.
+return `503` instead of crashing. In production, startup **fails** if `JWT_SECRET` is shorter than 32 characters, or if `DATABASE_URL` is missing.
 
 ## 8. Integration flows and error mapping
 
@@ -270,7 +269,7 @@ if `OTP_PROVIDER=mock`, or if `DATABASE_URL` is missing.
 | Razorpay | 401 | `503 PAYMENT_PROVIDER_MISCONFIGURED` |
 | | 429 | `429 PAYMENT_PROVIDER_RATE_LIMITED` |
 | | 5xx / timeout | `502` / `504` |
-| MSG91 | OTP rejected | `401 INVALID_OTP` |
+| MSG91 | OTP rejected | `401` "Invalid or expired OTP" |
 | | bad credentials | `503` |
 
 Retries: metadata lists and Razorpay fetches retry on network errors, 429 and 5xx (exponential backoff that respects
@@ -285,7 +284,7 @@ retried after a timeout, because Surepass may already have processed and charged
 |---|---|
 | Secrets | Read from the environment only. No defaults for secrets. Never returned, logged or stored (`api_request_logs` keeps only sanitized ids, status and amounts; the integration tests checked this). |
 | Logging | pino redaction of `authorization`, `cookie`, `otp`, `token`, `signature`, `password`, `secret`, `apiKey` and `privateKey` at any depth. Request logs contain method, path and status only (no bodies, no query strings). Mobile numbers are masked. |
-| OTP | Never generated, stored or logged by us (MSG91 does that). The mock provider is refused in production. The widget flow cross-checks the number MSG91 reports. Send and verify are rate-limited per mobile number and per IP. |
+| OTP | Never generated, stored or logged by us: the MSG91 widget sends it and MSG91 verifies it. The number MSG91 reports is cross-checked against the client's number. Verification is rate-limited per mobile number and per IP. |
 | JWT | HS256 with a pinned algorithm, issuer check, expiry, and a user lookup on every request (blocked or deleted users are rejected). |
 | Payments | Amounts come from the DB. Checkout signatures are checked, and the payment is fetched from Razorpay before activation. Webhook signatures are checked over the raw bytes. All comparisons are timing-safe. Activation is idempotent. |
 | Authorization | Every query is scoped by `userId`. Another user's id returns 404 (no existence leak). This is covered by tests. |

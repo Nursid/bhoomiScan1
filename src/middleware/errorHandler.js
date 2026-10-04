@@ -6,6 +6,7 @@
 const { Prisma } = require('@prisma/client');
 const { AppError } = require('../utils/errors');
 const logger = require('../utils/logger');
+const { describeDatabaseUrl, describeDbError } = require('../database/diagnostics');
 
 const fromPrisma = (error) => {
   if (error instanceof Prisma.PrismaClientKnownRequestError) {
@@ -13,7 +14,10 @@ const fromPrisma = (error) => {
     if (error.code === 'P2025') return new AppError(404, 'NOT_FOUND', 'Resource not found');
   }
   if (error instanceof Prisma.PrismaClientInitializationError) {
-    return new AppError(503, 'DATABASE_UNAVAILABLE', 'Database is unavailable');
+    // The client still only sees DATABASE_UNAVAILABLE; the real cause goes to the log.
+    return new AppError(503, 'DATABASE_UNAVAILABLE', 'Database is unavailable', {
+      meta: { dbError: describeDbError(error), database: describeDatabaseUrl() },
+    });
   }
   return null;
 };
@@ -27,6 +31,7 @@ const fromBodyParser = (error) => {
 const notFoundHandler = (req, res) => {
   res.status(404).json({
     success: false,
+    message: `Route ${req.method} ${req.path} not found`,
     error: { code: 'ROUTE_NOT_FOUND', message: `Route ${req.method} ${req.path} not found` },
     requestId: req.id,
   });
@@ -41,6 +46,7 @@ const errorHandler = (err, req, res, next) => {
     log.error({ err, requestId: req.id }, 'unhandled error');
     res.status(500).json({
       success: false,
+      message: 'Something went wrong',
       error: { code: 'INTERNAL_ERROR', message: 'Something went wrong' },
       requestId: req.id,
     });
@@ -57,7 +63,8 @@ const errorHandler = (err, req, res, next) => {
       providerStatus: error.providerStatus,
       providerMessage: error.providerMessage,
       meta: error.meta,
-      ...(error.statusCode >= 500 && err !== error ? { err } : {}),
+      // Prisma errors are logged via meta.dbError (sanitized) instead of the raw error.
+      ...(error.statusCode >= 500 && err !== error && !error.meta?.dbError ? { err } : {}),
     },
     error.message,
   );
@@ -67,6 +74,7 @@ const errorHandler = (err, req, res, next) => {
   }
   res.status(error.statusCode).json({
     success: false,
+    message: error.message,
     error: {
       code: error.code,
       message: error.message,

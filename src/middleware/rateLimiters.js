@@ -43,11 +43,6 @@ const globalLimiter = base({
   skip: (req) => (config.isTest && process.env.RATE_LIMIT_IN_TESTS !== 'true') || req.path === '/payments/webhook',
 });
 
-const otpSendLimiters = [
-  base({ limit: config.rateLimit.otpSendMax, keyGenerator: mobileKey('otp-send') }),
-  base({ limit: config.rateLimit.otpSendMax * 4, keyGenerator: (req) => `otp-send-ip:${ipKey(req)}` }),
-];
-
 const otpVerifyLimiters = [
   base({ limit: config.rateLimit.otpVerifyMax, keyGenerator: mobileKey('otp-verify') }),
   base({ limit: config.rateLimit.otpVerifyMax * 4, keyGenerator: (req) => `otp-verify-ip:${ipKey(req)}` }),
@@ -59,4 +54,4 @@ const landVerifyLimiter = base({
   keyGenerator: (req) => `land-verify:${req.user?.id || ipKey(req)}`,
 });
 
-module.exports = { globalLimiter, otpSendLimiters, otpVerifyLimiters, landVerifyLimiter };
+module.exports = { globalLimiter, otpVerifyLimiters, landVerifyLimiter };

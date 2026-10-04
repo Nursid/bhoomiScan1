@@ -33,16 +33,17 @@ npm run db:seed                   # monthly / quarterly plans
 npm run dev                       # http://localhost:4000
 ```
 
-To log in during development, use `OTP_PROVIDER=mock`. The service then accepts `OTP_MOCK_CODE` and does not send an SMS. It refuses to start with this setting in production.
+Login works the same way as in the reference backend. The app runs the MSG91 widget's `sendOtp()`. The backend then verifies the OTP with MSG91 (`MSG91_WIDGET_ID`, `MSG91_TOKEN_AUTH`) and issues a JWT.
 
 ```bash
-curl -X POST localhost:4000/api/v1/auth/send-otp   -H 'content-type: application/json' -d '{"mobile":"7081002501"}'
-curl -X POST localhost:4000/api/v1/auth/verify-otp -H 'content-type: application/json' -d '{"mobile":"7081002501","otp":"123456"}'
+curl -X POST localhost:4000/api/auth/mobile-verify -H 'content-type: application/json' \
+  -d '{"mobile":"917081002501","otp":"302348","reqId":"36697a704157303534313839"}'
+curl localhost:4000/api/auth/me -H "Authorization: Bearer <token>"
 ```
 
 ### Full flow
 
-1. Log in: `POST /auth/verify-otp` returns a `token`.
+1. Log in: `POST /api/auth/mobile-verify {mobile, otp, reqId}` returns a `token`.
 2. Pick a plan: `GET /plans`.
 3. Create a subscription: `POST /subscriptions/create {planCode}`.
 4. Create a payment: `POST /payments/create {subscriptionId}` returns the details for Razorpay Checkout.

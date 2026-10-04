@@ -9,10 +9,12 @@ const pinoHttp = require('pino-http');
 const config = require('./config');
 const logger = require('./utils/logger');
 const { prisma } = require('./database/prisma');
+const { describeDatabaseUrl, describeDbError } = require('./database/diagnostics');
 const requestContext = require('./middleware/requestContext');
 const { globalLimiter } = require('./middleware/rateLimiters');
 const { errorHandler, notFoundHandler } = require('./middleware/errorHandler');
 const v1 = require('./routes');
+const authRoutes = require('./modules/auth/auth.routes');
 
 const createApp = () => {
   const app = express();
@@ -58,8 +60,14 @@ const createApp = () => {
     try {
       await prisma.$queryRaw`SELECT 1`;
       res.json({ success: true, data: { status: 'ready', database: 'up' } });
-    } catch {
-      res.status(503).json({ success: false, error: { code: 'NOT_READY', message: 'Database unavailable' }, requestId: req.id });
+    } catch (err) {
+      const dbError = describeDbError(err);
+      (req.log || logger).error({ dbError, database: describeDatabaseUrl(), requestId: req.id }, 'readiness check failed');
+      res.status(503).json({
+        success: false,
+        error: { code: 'NOT_READY', message: 'Database unavailable', details: { name: dbError.name, code: dbError.code } },
+        requestId: req.id,
+      });
     }
   });
 
@@ -75,6 +83,8 @@ const createApp = () => {
     }
   }
 
+  // Same paths as the reference backend: /api/auth/mobile-verify, /api/auth/me
+  app.use('/api/auth', globalLimiter, authRoutes);
   app.use('/api/v1', globalLimiter, v1);
 
   app.use(notFoundHandler);

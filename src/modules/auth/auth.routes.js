@@ -1,12 +1,17 @@
+/**
+ * Mounted at /api/auth (same paths as the reference backend):
+ *   POST /api/auth/mobile-verify   { mobile, otp, reqId }
+ *   GET  /api/auth/me              Authorization: Bearer <token>
+ */
+
 const { Router } = require('express');
-const validate = require('../../middleware/validate');
-const { otpSendLimiters, otpVerifyLimiters } = require('../../middleware/rateLimiters');
-const { sendOtpSchema, verifyOtpSchema } = require('./auth.validation');
+const { authenticate } = require('../../middleware/authenticate');
+const { otpVerifyLimiters } = require('../../middleware/rateLimiters');
 const controller = require('./auth.controller');
 
 const router = Router();
 
-router.post('/send-otp', ...otpSendLimiters, validate({ body: sendOtpSchema }), controller.sendOtp);
-router.post('/verify-otp', ...otpVerifyLimiters, validate({ body: verifyOtpSchema }), controller.verifyOtp);
+router.post('/mobile-verify', ...otpVerifyLimiters, controller.mobileVerify);
+router.get('/me', authenticate, controller.me);
 
 module.exports = router;

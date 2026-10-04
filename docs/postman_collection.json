@@ -2,7 +2,7 @@
   "info": {
     "name": "BhoomiScan Land Verification API",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-    "description": "Run Auth > Verify OTP first; it stores {{token}}. Later requests reuse ids captured by earlier ones."
+    "description": "Run Auth > Mobile verify first (get otp + reqId from the MSG91 widget); it stores {{token}}. Later requests reuse ids captured by earlier ones."
   },
   "auth": {
     "type": "bearer",
@@ -17,15 +17,19 @@
   "variable": [
     {
       "key": "baseUrl",
-      "value": "http://localhost:4000/api/v1"
+      "value": "http://localhost:4000"
     },
     {
       "key": "mobile",
-      "value": "7081002501"
+      "value": "917081002501"
     },
     {
       "key": "otp",
-      "value": "123456"
+      "value": "302348"
+    },
+    {
+      "key": "reqId",
+      "value": "36697a704157303534313839"
     },
     {
       "key": "token",
@@ -61,41 +65,7 @@
       "name": "Auth",
       "item": [
         {
-          "name": "Send OTP",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "auth": {
-              "type": "noauth"
-            },
-            "url": {
-              "raw": "{{baseUrl}}/auth/send-otp",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "auth",
-                "send-otp"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"mobile\": \"{{mobile}}\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          }
-        },
-        {
-          "name": "Verify OTP",
+          "name": "Mobile verify (MSG91 widget OTP)",
           "event": [
             {
               "listen": "test",
@@ -103,7 +73,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "const r = pm.response.json();",
-                  "if (r.success) { pm.collectionVariables.set('token', r.data.token); }"
+                  "if (r.success) { pm.collectionVariables.set('token', r.token); }"
                 ]
               }
             }
@@ -120,23 +90,47 @@
               "type": "noauth"
             },
             "url": {
-              "raw": "{{baseUrl}}/auth/verify-otp",
+              "raw": "{{baseUrl}}/api/auth/mobile-verify",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
                 "auth",
-                "verify-otp"
+                "mobile-verify"
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"mobile\": \"{{mobile}}\",\n  \"otp\": \"{{otp}}\"\n}",
+              "raw": "{\n  \"mobile\": \"{{mobile}}\",\n  \"otp\": \"{{otp}}\",\n  \"reqId\": \"{{reqId}}\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
+            }
+          }
+        },
+        {
+          "name": "Me",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "me"
+              ]
             }
           }
         }
@@ -156,11 +150,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/users/me",
+              "raw": "{{baseUrl}}/api/v1/users/me",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
+                "v1",
                 "users",
                 "me"
               ]
@@ -178,11 +174,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/users/me",
+              "raw": "{{baseUrl}}/api/v1/users/me",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
+                "v1",
                 "users",
                 "me"
               ]
@@ -217,11 +215,13 @@
               "type": "noauth"
             },
             "url": {
-              "raw": "{{baseUrl}}/plans",
+              "raw": "{{baseUrl}}/api/v1/plans",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
+                "v1",
                 "plans"
               ]
             }
@@ -250,11 +250,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/subscriptions/create",
+              "raw": "{{baseUrl}}/api/v1/subscriptions/create",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
+                "v1",
                 "subscriptions",
                 "create"
               ]
@@ -281,11 +283,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/subscriptions/current",
+              "raw": "{{baseUrl}}/api/v1/subscriptions/current",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
+                "v1",
                 "subscriptions",
                 "current"
               ]
@@ -303,11 +307,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/subscriptions",
+              "raw": "{{baseUrl}}/api/v1/subscriptions",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
+                "v1",
                 "subscriptions"
               ]
             }
@@ -324,11 +330,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/subscriptions/{{subscriptionId}}/cancel",
+              "raw": "{{baseUrl}}/api/v1/subscriptions/{{subscriptionId}}/cancel",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
+                "v1",
                 "subscriptions",
                 "{{subscriptionId}}",
                 "cancel"
@@ -364,11 +372,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/payments/create",
+              "raw": "{{baseUrl}}/api/v1/payments/create",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
+                "v1",
                 "payments",
                 "create"
               ]
@@ -395,11 +405,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/payments/verify",
+              "raw": "{{baseUrl}}/api/v1/payments/verify",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
+                "v1",
                 "payments",
                 "verify"
               ]
@@ -426,11 +438,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/payments",
+              "raw": "{{baseUrl}}/api/v1/payments",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
+                "v1",
                 "payments"
               ]
             }
@@ -450,11 +464,13 @@
               "type": "noauth"
             },
             "url": {
-              "raw": "{{baseUrl}}/payments/webhook",
+              "raw": "{{baseUrl}}/api/v1/payments/webhook",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
+                "v1",
                 "payments",
                 "webhook"
               ]
@@ -486,11 +502,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/land-verification/states",
+              "raw": "{{baseUrl}}/api/v1/land-verification/states",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
+                "v1",
                 "land-verification",
                 "states"
               ]
@@ -508,11 +526,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/land-verification/punjab/districts",
+              "raw": "{{baseUrl}}/api/v1/land-verification/punjab/districts",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
+                "v1",
                 "land-verification",
                 "punjab",
                 "districts"
@@ -531,11 +551,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/land-verification/punjab/tehsils",
+              "raw": "{{baseUrl}}/api/v1/land-verification/punjab/tehsils",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
+                "v1",
                 "land-verification",
                 "punjab",
                 "tehsils"
@@ -563,11 +585,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/land-verification/punjab/villages",
+              "raw": "{{baseUrl}}/api/v1/land-verification/punjab/villages",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
+                "v1",
                 "land-verification",
                 "punjab",
                 "villages"
@@ -595,11 +619,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/land-verification/punjab/years",
+              "raw": "{{baseUrl}}/api/v1/land-verification/punjab/years",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
+                "v1",
                 "land-verification",
                 "punjab",
                 "years"
@@ -627,11 +653,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/land-verification/punjab/khasras",
+              "raw": "{{baseUrl}}/api/v1/land-verification/punjab/khasras",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
+                "v1",
                 "land-verification",
                 "punjab",
                 "khasras"
@@ -671,11 +699,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/land-verification/punjab/verify",
+              "raw": "{{baseUrl}}/api/v1/land-verification/punjab/verify",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
+                "v1",
                 "land-verification",
                 "punjab",
                 "verify"
@@ -703,11 +733,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/land-verification",
+              "raw": "{{baseUrl}}/api/v1/land-verification",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
+                "v1",
                 "land-verification"
               ]
             }
@@ -724,11 +756,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/land-verification/{{verificationId}}",
+              "raw": "{{baseUrl}}/api/v1/land-verification/{{verificationId}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
+                "v1",
                 "land-verification",
                 "{{verificationId}}"
               ]
@@ -746,11 +780,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/land-verification/{{verificationId}}/history",
+              "raw": "{{baseUrl}}/api/v1/land-verification/{{verificationId}}/history",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
+                "v1",
                 "land-verification",
                 "{{verificationId}}",
                 "history"
@@ -769,11 +805,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/land-verification/{{verificationId}}/history/{{snapshotId}}",
+              "raw": "{{baseUrl}}/api/v1/land-verification/{{verificationId}}/history/{{snapshotId}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
+                "v1",
                 "land-verification",
                 "{{verificationId}}",
                 "history",
@@ -793,11 +831,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/land-verification/{{verificationId}}/changes",
+              "raw": "{{baseUrl}}/api/v1/land-verification/{{verificationId}}/changes",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
+                "v1",
                 "land-verification",
                 "{{verificationId}}",
                 "changes"
@@ -816,11 +856,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/land-verification/{{verificationId}}/changes?critical=true",
+              "raw": "{{baseUrl}}/api/v1/land-verification/{{verificationId}}/changes?critical=true",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
+                "v1",
                 "land-verification",
                 "{{verificationId}}",
                 "changes"
@@ -845,11 +887,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/land-verification/{{verificationId}}/monitoring",
+              "raw": "{{baseUrl}}/api/v1/land-verification/{{verificationId}}/monitoring",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
+                "v1",
                 "land-verification",
                 "{{verificationId}}",
                 "monitoring"
@@ -877,11 +921,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/land-verification/{{verificationId}}/monitoring",
+              "raw": "{{baseUrl}}/api/v1/land-verification/{{verificationId}}/monitoring",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
+                "v1",
                 "land-verification",
                 "{{verificationId}}",
                 "monitoring"
@@ -914,11 +960,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/smart-contract/records?landVerificationId={{verificationId}}",
+              "raw": "{{baseUrl}}/api/v1/smart-contract/records?landVerificationId={{verificationId}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
+                "v1",
                 "smart-contract",
                 "records"
               ],
@@ -942,11 +990,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/smart-contract/records/{{smartContractRecordId}}",
+              "raw": "{{baseUrl}}/api/v1/smart-contract/records/{{smartContractRecordId}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
+                "v1",
                 "smart-contract",
                 "records",
                 "{{smartContractRecordId}}"
@@ -965,11 +1015,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/smart-contract/records/{{smartContractRecordId}}/retry",
+              "raw": "{{baseUrl}}/api/v1/smart-contract/records/{{smartContractRecordId}}/retry",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
+                "v1",
                 "smart-contract",
                 "records",
                 "{{smartContractRecordId}}",
@@ -1006,11 +1058,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/alerts",
+              "raw": "{{baseUrl}}/api/v1/alerts",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
+                "v1",
                 "alerts"
               ]
             }
@@ -1027,11 +1081,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/alerts?status=UNREAD",
+              "raw": "{{baseUrl}}/api/v1/alerts?status=UNREAD",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
+                "v1",
                 "alerts"
               ],
               "query": [
@@ -1054,11 +1110,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/alerts/{{alertId}}/read",
+              "raw": "{{baseUrl}}/api/v1/alerts/{{alertId}}/read",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
+                "v1",
                 "alerts",
                 "{{alertId}}",
                 "read"
@@ -1077,11 +1135,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/alerts/read-all",
+              "raw": "{{baseUrl}}/api/v1/alerts/read-all",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
+                "api",
+                "v1",
                 "alerts",
                 "read-all"
               ]

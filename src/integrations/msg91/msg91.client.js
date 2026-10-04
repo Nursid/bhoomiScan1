@@ -1,120 +1,164 @@
 /**
- * MSG91 OTP client.
+ * MSG91 server-side client for the OTP Widget flow.
+ * Ported from the reference backend's server/msg91Client.js (same behaviour).
  *
- *   sendOtp    POST {base}/api/v5/otp?template_id=&mobile=&otp_expiry=&otp_length=   (header authkey)
- *   verifyOtp  GET  {base}/api/v5/otp/verify?mobile=&otp=                            (header authkey)
- *   verifyWidgetOtp POST {base}/api/v5/widget/verifyOtp { widgetId, tokenAuth, reqId, otp }
+ * The UI runs the MSG91 widget's sendOtp() and gets a reqId. The user types the
+ * OTP, and the backend verifies it with MSG91's widget verifyOtp API:
  *
- * MSG91 generates, stores and checks the OTP; this backend never stores it.
- * MSG91 answers HTTP 200 with { type: "success" | "error", message } for most
- * outcomes, so success is decided on `type`. The OTP travels in the query string
- * (MSG91's API design); audit logs only keep the path, never the query.
+ *   POST {MSG91_BASE_URL}/api/v5/widget/verifyOtp
+ *   Content-Type: application/json
+ *   { "widgetId": "<MSG91_WIDGET_ID>", "tokenAuth": "<MSG91_TOKEN_AUTH>", "reqId": "...", "otp": "..." }
  *
- * Widget error behaviour (observed in the reference project): 703 already verified,
- * 709 unknown reqId, 401 bad tokenAuth.
+ * Observed live:
+ *   already verified  -> { "message": "otp already verifed", "type": "error", "code": 703 }
+ *   unknown reqId     -> { "message": "no request found",     "type": "error", "code": 709 }
+ *   bad tokenAuth     -> { "message": "AuthenticationFailure","type": "error", "code": 401 }
+ *   success           -> { "type": "success", ... }
+ *
+ * No OTP is generated, stored or compared here. Credentials are never logged or
+ * returned. The OTP is never logged.
  */
 
 const config = require('../../config');
-const { createHttpClient } = require('../../utils/httpClient');
-const { ProviderError, AppError } = require('../../utils/errors');
+const logger = require('../../utils/logger');
 
-const PROVIDER = 'MSG91';
+class Msg91Error extends Error {
+  /**
+   * @param {string} message      safe message for the client
+   * @param {object} options
+   * @param {number} options.statusCode  401 (OTP rejected), 502 (provider failure), 503 (our config)
+   */
+  constructor(message, options = {}) {
+    super(message);
+    this.name = 'Msg91Error';
+    this.statusCode = options.statusCode || 502;
+    this.providerMessage = options.providerMessage || null;
+    this.providerCode = options.providerCode ?? null;
+  }
+}
 
-const isConfigured = () => Boolean(config.msg91.authKey && config.msg91.templateId);
-const isWidgetConfigured = () => Boolean(config.msg91.widgetId && config.msg91.widgetTokenAuth);
+/** Ready when the widget id and a credential (tokenAuth, or the account auth key) are present. */
+const isConfigured = () => {
+  const { widgetId, tokenAuth, authKey } = config.msg91;
+  return Boolean(widgetId && (tokenAuth || authKey));
+};
 
-const CREDENTIAL_HINTS = ['authenticationfailure', 'authkey', 'tokenauth', 'invalid auth'];
+/** Redacts credential-looking strings before a debug log. */
+const redactForLog = (value) => {
+  const { tokenAuth, authKey } = config.msg91;
+  let text = JSON.stringify(value) || '';
+  [tokenAuth, authKey].filter(Boolean).forEach((secret) => {
+    text = text.split(secret).join('<redacted>');
+  });
+  return text.replace(/[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]*/g, '<redacted-token>');
+};
 
-const isCredentialFailure = (body, status) => {
+const REJECTION_CODES = new Set(['702', '703', '705', '709', '710']);
+
+const isOtpRejection = (body) => {
   const message = String(body?.message || '').toLowerCase();
-  return status === 401 || String(body?.code) === '401' || CREDENTIAL_HINTS.some((hint) => message.includes(hint));
+  const code = String(body?.code || '');
+  return (
+    REJECTION_CODES.has(code) ||
+    message.includes('otp') ||
+    message.includes('no request found') ||
+    message.includes('expired') ||
+    message.includes('invalid') ||
+    message.includes('attempt')
+  );
 };
 
-const mapError = ({ status, body, timedOut, networkError }) => {
-  if (timedOut || networkError) {
-    return new ProviderError(502, 'OTP_PROVIDER_UNAVAILABLE', 'OTP service is temporarily unavailable', {
-      provider: PROVIDER,
-      retryable: true,
-      providerMessage: timedOut ? 'timeout' : networkError.message,
+const isCredentialFailure = (body) => {
+  const message = String(body?.message || '').toLowerCase();
+  const code = String(body?.code || '');
+  return code === '401' || message.includes('authenticationfailure') || message.includes('authkey') || message.includes('tokenauth');
+};
+
+/**
+ * Verifies `otp` for the widget request `reqId` with MSG91.
+ * Resolves with { verified: true, identifier|null } or throws Msg91Error
+ * with statusCode 401 / 502 / 503.
+ */
+const verifyWidgetOtp = async ({ reqId, otp }) => {
+  const { widgetId, tokenAuth, authKey, baseUrl, timeoutMs, debugResponses } = config.msg91;
+
+  if (!widgetId || (!tokenAuth && !authKey)) {
+    throw new Msg91Error('Mobile OTP login is not configured on the server (MSG91).', { statusCode: 503 });
+  }
+
+  const headers = { 'content-type': 'application/json', accept: 'application/json' };
+  const payload = { widgetId, reqId, otp };
+  if (tokenAuth) {
+    payload.tokenAuth = tokenAuth;
+  } else {
+    headers.authkey = authKey;
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  let response;
+  let text = '';
+  try {
+    response = await fetch(`${baseUrl}/api/v5/widget/verifyOtp`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(payload),
+      signal: controller.signal,
     });
+    text = await response.text();
+  } catch (error) {
+    const reason = error?.name === 'AbortError' ? 'MSG91 request timed out.' : error?.message;
+    logger.warn({ reason }, '[MOBILE VERIFY] MSG91 verifyOtp unreachable');
+    throw new Msg91Error('Unable to verify OTP with MSG91.', { statusCode: 502, providerMessage: reason });
+  } finally {
+    clearTimeout(timer);
   }
-  const providerMessage = String(body?.message || `http ${status}`);
-  if (isCredentialFailure(body, status)) {
-    return new ProviderError(503, 'OTP_PROVIDER_MISCONFIGURED', 'OTP service is not configured correctly', {
-      provider: PROVIDER,
-      providerStatus: status,
-      providerMessage,
-    });
+
+  let body = null;
+  try {
+    body = text ? JSON.parse(text) : null;
+  } catch {
+    body = null;
   }
-  if (status >= 500) {
-    return new ProviderError(502, 'OTP_PROVIDER_UNAVAILABLE', 'OTP service is temporarily unavailable', {
-      provider: PROVIDER,
-      providerStatus: status,
-      providerMessage,
-      retryable: true,
-    });
+
+  if (!body || typeof body !== 'object') {
+    logger.warn({ httpStatus: response.status }, '[MOBILE VERIFY] MSG91 verifyOtp returned a non-JSON response');
+    throw new Msg91Error('Unable to verify OTP with MSG91.', { statusCode: 502, providerMessage: 'Malformed MSG91 response' });
   }
-  // Remaining "type: error" answers are OTP rejections (wrong, expired, max attempts, unknown reqId).
-  return new ProviderError(401, 'INVALID_OTP', 'Invalid or expired OTP', {
-    provider: PROVIDER,
-    providerStatus: status,
-    providerMessage,
-  });
+
+  if (debugResponses) {
+    // Development aid only: response shape with credentials and tokens removed.
+    logger.info({ response: redactForLog(body) }, '[MOBILE VERIFY] MSG91 verifyOtp response');
+  }
+
+  const type = String(body.type || '').toLowerCase();
+  if (type !== 'success') {
+    const providerMessage = String(body.message || 'MSG91 rejected the OTP');
+    const providerCode = body.code ?? null;
+
+    if (isCredentialFailure(body)) {
+      logger.warn({ providerMessage }, '[MOBILE VERIFY] MSG91 rejected our widget credentials');
+      throw new Msg91Error('Mobile OTP login is not configured on the server (MSG91).', { statusCode: 503, providerMessage, providerCode });
+    }
+    if (isOtpRejection(body) || response.ok) {
+      logger.warn({ providerMessage, providerCode }, '[MOBILE VERIFY] MSG91 rejected the OTP');
+      throw new Msg91Error('Invalid or expired OTP', { statusCode: 401, providerMessage, providerCode });
+    }
+    logger.warn({ providerMessage, httpStatus: response.status }, '[MOBILE VERIFY] MSG91 verifyOtp failed');
+    throw new Msg91Error('Unable to verify OTP with MSG91.', { statusCode: 502, providerMessage, providerCode });
+  }
+
+  // MSG91 may or may not echo the identifier; when it does, the caller cross-checks it.
+  const identifierCandidates = [body.identifier, body.mobile, body.data?.identifier, body.data?.mobile];
+  const identifier = identifierCandidates.find((value) => typeof value === 'string' && value.trim()) || null;
+
+  return { verified: true, identifier: identifier ? identifier.trim() : null };
 };
 
-const client = createHttpClient({
-  provider: PROVIDER,
-  baseUrl: () => config.msg91.baseUrl,
-  timeoutMs: () => config.msg91.timeoutMs,
-  headers: () => (config.msg91.authKey ? { authkey: config.msg91.authKey } : {}),
-  isSuccess: (status, body) => status >= 200 && status < 300 && String(body?.type || '').toLowerCase() === 'success',
-  mapError,
-  // Only keep type/message/code: success bodies may echo request data.
-  auditResponseBody: (body) => ({ type: body?.type, message: body?.message, code: body?.code }),
-});
-
-const requireConfigured = () => {
-  if (!isConfigured()) {
-    throw new AppError(503, 'OTP_NOT_CONFIGURED', 'OTP login is not configured on the server');
-  }
+module.exports = {
+  Msg91Error,
+  isConfigured,
+  verifyWidgetOtp,
+  __testing: { redactForLog, isOtpRejection, isCredentialFailure },
 };
-
-/** @param {string} digits mobile with country code, no "+" (e.g. 917081002501) */
-const sendOtp = async (digits) => {
-  requireConfigured();
-  const params = new URLSearchParams({
-    template_id: config.msg91.templateId,
-    mobile: digits,
-    otp_expiry: String(config.msg91.otpExpiryMinutes),
-    otp_length: String(config.msg91.otpLength),
-  });
-  const { body } = await client.post(`/api/v5/otp?${params}`, {}, { operation: 'otp.send', auditRequestBody: { mobile: `***${digits.slice(-4)}` } });
-  return { requestId: body?.request_id || null };
-};
-
-const verifyOtp = async (digits, otp) => {
-  requireConfigured();
-  const params = new URLSearchParams({ mobile: digits, otp });
-  await client.get(`/api/v5/otp/verify?${params}`, { operation: 'otp.verify', auditRequestBody: { mobile: `***${digits.slice(-4)}` } });
-  return { verified: true };
-};
-
-/** Widget flow: the client ran the MSG91 widget's sendOtp() and holds a reqId. */
-const verifyWidgetOtp = async (reqId, otp) => {
-  if (!isWidgetConfigured()) {
-    throw new AppError(503, 'OTP_NOT_CONFIGURED', 'OTP widget login is not configured on the server');
-  }
-  const { body } = await client.request({
-    method: 'POST',
-    path: '/api/v5/widget/verifyOtp',
-    body: { widgetId: config.msg91.widgetId, tokenAuth: config.msg91.widgetTokenAuth, reqId, otp },
-    headers: { authkey: undefined },
-    operation: 'otp.widget.verify',
-    auditRequestBody: { reqId },
-  });
-  const candidates = [body?.identifier, body?.mobile, body?.data?.identifier, body?.data?.mobile];
-  const identifier = candidates.find((value) => typeof value === 'string' && value.trim()) || null;
-  return { verified: true, identifier };
-};
-
-module.exports = { isConfigured, isWidgetConfigured, sendOtp, verifyOtp, verifyWidgetOtp, __testing: { mapError } };

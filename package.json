@@ -34,6 +34,7 @@
     "pino-http": "^10.5.0",
     "swagger-ui-express": "^5.0.1",
     "yaml": "^2.8.0",
+    "zcatalyst-sdk-node": "^2.5.0",
     "zod": "^3.25.0"
   },
   "optionalDependencies": {

@@ -3,7 +3,8 @@
 const config = require('./config');
 const logger = require('./utils/logger');
 const { createApp } = require('./app');
-const { disconnect } = require('./database/prisma');
+const { prisma, disconnect } = require('./database/prisma');
+const { describeDatabaseUrl, describeDbError } = require('./database/diagnostics');
 const cache = require('./utils/cache');
 const scheduler = require('./jobs/scheduler');
 const msg91 = require('./integrations/msg91/msg91.client');
@@ -20,7 +21,7 @@ const server = app.listen(config.port, config.host, () => {
       env: config.env,
       readiness: {
         jwt: config.jwt.isConfigured,
-        otpProvider: config.otp.provider === 'mock' ? 'mock' : `msg91:${msg91.isConfigured()}`,
+        msg91: msg91.isConfigured(),
         razorpay: razorpay.isConfigured(),
         razorpayWebhook: razorpay.isWebhookConfigured(),
         surepass: surepass.isConfigured(),
@@ -32,7 +33,20 @@ const server = app.listen(config.port, config.host, () => {
     'BhoomiScan API listening',
   );
   if (config.jobs.enabled) scheduler.start();
+  checkDatabase();
 });
+
+// Non-fatal startup probe: logs the real (sanitized) cause if Prisma cannot reach the database.
+const checkDatabase = async () => {
+  const database = describeDatabaseUrl();
+  const runtime = { platform: process.platform, arch: process.arch, node: process.version };
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    logger.info({ database, runtime }, 'database connection ok');
+  } catch (err) {
+    logger.error({ dbError: describeDbError(err), database, runtime }, 'database connection failed');
+  }
+};
 
 let shuttingDown = false;
 const shutdown = async (signal) => {

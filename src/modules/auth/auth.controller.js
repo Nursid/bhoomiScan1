@@ -1,8 +1,8 @@
 const authService = require('./auth.service');
-const { ok } = require('../../utils/response');
 
-const sendOtp = async (req, res) => ok(res, await authService.sendOtp(req.body.mobile));
+// Same response bodies as the reference backend (not wrapped in `data`).
+const mobileVerify = async (req, res) => res.json(await authService.mobileVerify(req.body));
 
-const verifyOtp = async (req, res) => ok(res, await authService.verifyOtp(req.body));
+const me = async (req, res) => res.json(await authService.me(req.user, req.auth));
 
-module.exports = { sendOtp, verifyOtp };
+module.exports = { mobileVerify, me };

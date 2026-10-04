@@ -49,6 +49,13 @@ const installFetch = () => {
       headers: { 'content-type': 'application/json', ...(result.headers || {}) },
     });
   });
+  // MSG91 widget verifyOtp: OTP 654321 is accepted, anything else is rejected like MSG91 does.
+  routes.push({
+    method: 'POST',
+    url: /^https:\/\/msg91\.test\/api\/v5\/widget\/verifyOtp$/,
+    reply: (url, init, body) =>
+      body.otp === '654321' ? { body: { type: 'success', message: 'OTP verified' } } : { body: { type: 'error', message: 'OTP not match', code: 702 } },
+  });
   return {
     calls,
     on(method, url, reply) {
@@ -66,9 +73,9 @@ const installFetch = () => {
 const api = () => request(createApp());
 
 const login = async (app, mobile) => {
-  const res = await app.post('/api/v1/auth/verify-otp').send({ mobile, otp: '654321' });
+  const res = await app.post('/api/auth/mobile-verify').send({ mobile, otp: '654321', reqId: '36697a704157303534313839' });
   if (res.status !== 200) throw new Error(`login failed: ${res.status} ${JSON.stringify(res.body)}`);
-  return { token: res.body.data.token, user: res.body.data.user, auth: { Authorization: `Bearer ${res.body.data.token}` } };
+  return { token: res.body.token, user: res.body.user, auth: { Authorization: `Bearer ${res.body.token}` } };
 };
 
 const giveActiveSubscription = async (userId, code = 'quarterly') => {

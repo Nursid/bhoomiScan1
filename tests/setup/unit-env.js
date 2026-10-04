@@ -12,6 +12,7 @@ Object.assign(process.env, {
   RAZORPAY_KEY_ID: 'rzp_test_unit',
   RAZORPAY_KEY_SECRET: 'rzp-unit-secret',
   RAZORPAY_WEBHOOK_SECRET: 'rzp-unit-webhook-secret',
-  OTP_PROVIDER: 'mock',
-  OTP_MOCK_CODE: '123456',
+  MSG91_WIDGET_ID: 'widget-unit',
+  MSG91_TOKEN_AUTH: 'token-auth-unit',
+  MSG91_BASE_URL: 'https://msg91.test',
 });
