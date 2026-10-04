@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <title>BhoomiScan - Razorpay Test</title>
+
+  <!-- Razorpay Checkout -->
+  <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #f5f7fb;
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 500px;
+      background: white;
+      padding: 30px;
+      border-radius: 16px;
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.08);
+    }
+
+    h1 {
+      margin-top: 0;
+      margin-bottom: 8px;
+    }
+
+    .subtitle {
+      color: #666;
+      margin-bottom: 25px;
+    }
+
+    .plan {
+      border: 1px solid #ddd;
+      padding: 18px;
+      border-radius: 12px;
+      margin-bottom: 20px;
+    }
+
+    .plan h2 {
+      margin: 0 0 8px;
+    }
+
+    .price {
+      font-size: 28px;
+      font-weight: bold;
+    }
+
+    button {
+      width: 100%;
+      padding: 14px;
+      border: none;
+      border-radius: 10px;
+      background: #111827;
+      color: white;
+      font-size: 16px;
+      cursor: pointer;
+    }
+
+    button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    #status {
+      margin-top: 20px;
+      padding: 15px;
+      border-radius: 10px;
+      background: #f3f4f6;
+      white-space: pre-wrap;
+      word-break: break-word;
+      display: none;
+    }
+
+    .success {
+      background: #ecfdf5 !important;
+      color: #065f46;
+    }
+
+    .error {
+      background: #fef2f2 !important;
+      color: #991b1b;
+    }
+  </style>
+</head>
+
+<body>
+
+  <div class="container">
+
+    <h1>BhoomiScan</h1>
+
+    <div class="subtitle">
+      Razorpay Test Checkout
+    </div>
+
+    <div class="plan">
+      <h2>Monthly Plan</h2>
+
+      <p>
+        Land verification with recurring monitoring.
+      </p>
+
+      <div class="price">
+        ₹1
+      </div>
+    </div>
+
+    <button id="payButton">
+      Pay ₹1
+    </button>
+
+    <div id="status"></div>
+
+  </div>
+
+
+  <script>
+
+    // =========================================================
+    // CONFIG
+    // =========================================================
+
+    // Production API (Zoho Catalyst AppSail).
+    const API_BASE = "https://bhoomiscan-api-50046525593.development.catalystappsail.in";
+
+    // Login token (from POST /api/auth/mobile-verify). Never hardcode it: this page is public.
+    // It is asked for once and kept only in this browser tab.
+    let TOKEN = sessionStorage.getItem("bhoomiscanToken") || "";
+    if (!TOKEN) {
+      TOKEN = (prompt("Paste your login token (from /api/auth/mobile-verify):") || "").trim().replace(/^Bearer\s+/i, "");
+      if (TOKEN) sessionStorage.setItem("bhoomiscanToken", TOKEN);
+    }
+
+
+    // =========================================================
+    // UI
+    // =========================================================
+
+    const payButton = document.getElementById("payButton");
+    const statusBox = document.getElementById("status");
+
+
+    function showStatus(message, type = "") {
+
+      statusBox.style.display = "block";
+
+      statusBox.className = "";
+
+      if (type) {
+        statusBox.classList.add(type);
+      }
+
+      statusBox.textContent = message;
+    }
+
+
+    // =========================================================
+    // MAIN PAYMENT FLOW
+    // =========================================================
+
+    payButton.addEventListener("click", async () => {
+
+      try {
+
+        payButton.disabled = true;
+
+        showStatus("Creating subscription...");
+
+
+        // -----------------------------------------------------
+        // 1. CREATE SUBSCRIPTION
+        // -----------------------------------------------------
+
+        const subscriptionResponse = await fetch(
+          `${API_BASE}/api/v1/subscriptions/create`,
+          {
+            method: "POST",
+
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${TOKEN}`
+            },
+
+            body: JSON.stringify({
+              planCode: "monthly"
+            })
+          }
+        );
+
+
+        const subscriptionData =
+          await subscriptionResponse.json();
+
+
+        console.log(
+          "Subscription response:",
+          subscriptionData
+        );
+
+
+        if (!subscriptionResponse.ok ||
+            !subscriptionData.success) {
+
+          throw new Error(
+            subscriptionData?.error?.message ||
+            subscriptionData?.message ||
+            "Failed to create subscription"
+          );
+        }
+
+
+        const subscription =
+          subscriptionData.data.subscription;
+
+
+        const subscriptionId =
+          subscription.id;
+
+
+        showStatus(
+          `Subscription created.\n\n` +
+          `Subscription ID: ${subscriptionId}\n` +
+          `Status: ${subscription.status}\n\n` +
+          `Creating Razorpay order...`
+        );
+
+
+        // -----------------------------------------------------
+        // 2. CREATE RAZORPAY ORDER
+        // -----------------------------------------------------
+
+        const paymentResponse = await fetch(
+          `${API_BASE}/api/v1/payments/create`,
+          {
+            method: "POST",
+
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${TOKEN}`
+            },
+
+            body: JSON.stringify({
+              subscriptionId: subscriptionId
+            })
+          }
+        );
+
+
+        const paymentData =
+          await paymentResponse.json();
+
+
+        console.log(
+          "Payment create response:",
+          paymentData
+        );
+
+
+        if (!paymentResponse.ok ||
+            !paymentData.success) {
+
+          throw new Error(
+            paymentData?.error?.message ||
+            paymentData?.message ||
+            "Failed to create Razorpay order"
+          );
+        }
+
+
+        const payment =
+          paymentData.data.payment;
+
+        const checkout =
+          paymentData.data.checkout;
+
+
+        showStatus(
+          `Razorpay order created.\n\n` +
+          `Order ID: ${checkout.orderId}\n` +
+          `Amount: ₹${checkout.amount / 100}\n\n` +
+          `Opening Razorpay Checkout...`
+        );
+
+
+        // -----------------------------------------------------
+        // 3. OPEN RAZORPAY CHECKOUT
+        // -----------------------------------------------------
+
+        const options = {
+
+          key: checkout.keyId,
+
+          amount: checkout.amount,
+
+          currency: checkout.currency,
+
+          name: checkout.name,
+
+          description: checkout.description,
+
+          order_id: checkout.orderId,
+
+
+          // ---------------------------------------------------
+          // PAYMENT SUCCESS
+          // ---------------------------------------------------
+
+          handler: async function (response) {
+
+            console.log(
+              "Razorpay payment response:",
+              response
+            );
+
+
+            showStatus(
+              `Payment successful!\n\n` +
+              `Payment ID: ${response.razorpay_payment_id}\n` +
+              `Order ID: ${response.razorpay_order_id}\n\n` +
+              `Verifying payment...`
+            );
+
+
+            try {
+
+              // -----------------------------------------------
+              // 4. VERIFY PAYMENT
+              // -----------------------------------------------
+
+              const verifyResponse = await fetch(
+                `${API_BASE}/api/v1/payments/verify`,
+                {
+                  method: "POST",
+
+                  headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${TOKEN}`
+                  },
+
+                  body: JSON.stringify({
+
+                    razorpay_order_id:
+                      response.razorpay_order_id,
+
+                    razorpay_payment_id:
+                      response.razorpay_payment_id,
+
+                    razorpay_signature:
+                      response.razorpay_signature
+
+                  })
+                }
+              );
+
+
+              const verifyData =
+                await verifyResponse.json();
+
+
+              console.log(
+                "Verify response:",
+                verifyData
+              );
+
+
+              if (!verifyResponse.ok ||
+                  !verifyData.success) {
+
+                throw new Error(
+                  verifyData?.error?.message ||
+                  verifyData?.message ||
+                  "Payment verification failed"
+                );
+              }
+
+
+              // -----------------------------------------------
+              // SUCCESS
+              // -----------------------------------------------
+
+              showStatus(
+
+                `🎉 PAYMENT VERIFIED SUCCESSFULLY!\n\n` +
+
+                `Payment ID:\n` +
+                `${response.razorpay_payment_id}\n\n` +
+
+                `Order ID:\n` +
+                `${response.razorpay_order_id}\n\n` +
+
+                `Subscription:\n` +
+                `${subscriptionId}\n\n` +
+
+                `Response:\n` +
+                `${JSON.stringify(
+                  verifyData,
+                  null,
+                  2
+                )}`,
+
+                "success"
+              );
+
+
+              payButton.disabled = false;
+
+            } catch (error) {
+
+              console.error(
+                "Verification error:",
+                error
+              );
+
+              showStatus(
+                `Payment completed but verification failed.\n\n` +
+                `${error.message}`,
+                "error"
+              );
+
+              payButton.disabled = false;
+            }
+          },
+
+
+          // ---------------------------------------------------
+          // PAYMENT MODAL CLOSED
+          // ---------------------------------------------------
+
+          modal: {
+
+            ondismiss: function () {
+
+              showStatus(
+                "Razorpay Checkout closed.",
+                "error"
+              );
+
+              payButton.disabled = false;
+
+            }
+
+          },
+
+
+          theme: {
+            color: "#111827"
+          }
+
+        };
+
+
+        // Create Razorpay instance
+
+        const razorpay =
+          new Razorpay(options);
+
+
+        // Handle Razorpay errors
+
+        razorpay.on(
+          "payment.failed",
+          function (response) {
+
+            console.error(
+              "Payment failed:",
+              response.error
+            );
+
+            showStatus(
+
+              `Payment failed.\n\n` +
+
+              `Code: ${response.error.code}\n` +
+
+              `Description: ${response.error.description}\n\n` +
+
+              `Reason: ${response.error.reason}`,
+
+              "error"
+
+            );
+
+            payButton.disabled = false;
+
+          }
+        );
+
+
+        // Open Checkout
+
+        razorpay.open();
+
+
+      } catch (error) {
+
+        console.error(
+          "Payment flow error:",
+          error
+        );
+
+        showStatus(
+          `Error:\n\n${error.message}`,
+          "error"
+        );
+
+        payButton.disabled = false;
+
+      }
+
+    });
+
+  </script>
+
+</body>
+</html>

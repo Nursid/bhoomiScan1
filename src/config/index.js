@@ -150,7 +150,8 @@ const config = {
   port: env.PORT,
   host: env.HOST,
   logLevel: env.LOG_LEVEL,
-  corsOrigins: env.CORS_ORIGINS,
+  // Tolerates values pasted into a hosting console with quotes or a trailing slash.
+  corsOrigins: env.CORS_ORIGINS.map((origin) => origin.replace(/^["']+|["']+$/g, '').replace(/\/+$/, '').toLowerCase()).filter(Boolean),
   trustProxy,
   apiDocsEnabled: env.API_DOCS_ENABLED,
 

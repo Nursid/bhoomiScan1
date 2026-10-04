@@ -29,6 +29,7 @@ const server = app.listen(config.port, config.host, () => {
         cache: config.redisUrl ? 'redis' : 'memory',
         jobs: config.jobs.enabled,
       },
+      corsOrigins: config.corsOrigins,
     },
     'BhoomiScan API listening',
   );

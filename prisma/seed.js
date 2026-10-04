@@ -13,7 +13,7 @@ const PLANS = [
     code: 'monthly',
     name: 'Monthly',
     description: 'Land verification with recurring monitoring, billed monthly.',
-    amount: 59100,
+    amount: 100, // paise = ₹1 (Razorpay minimum)
     currency: 'INR',
     interval: 'MONTHLY',
     durationMonths: 1,
@@ -26,7 +26,7 @@ const PLANS = [
     code: 'quarterly',
     name: 'Quarterly',
     description: 'Land verification with recurring monitoring, billed every 3 months.',
-    amount: 159900,
+    amount: 100, // paise = ₹1 (Razorpay minimum)
     currency: 'INR',
     interval: 'QUARTERLY',
     durationMonths: 3,

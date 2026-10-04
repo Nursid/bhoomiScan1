@@ -38,7 +38,13 @@ const createApp = () => {
   app.use(
     cors({
       // Mobile apps / server-to-server calls send no Origin and are unaffected.
-      origin: (origin, callback) => callback(null, !origin || config.corsOrigins.includes(origin)),
+      // CORS_ORIGINS=* allows any browser origin (auth is still enforced by the Bearer token).
+      origin: (origin, callback) => {
+        const allowed =
+          !origin || config.corsOrigins.includes('*') || config.corsOrigins.includes(origin.replace(/\/+$/, '').toLowerCase());
+        if (!allowed) logger.warn({ origin, allowedOrigins: config.corsOrigins }, 'CORS origin rejected');
+        callback(null, allowed);
+      },
       methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
       allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-Id'],
       exposedHeaders: ['X-Request-Id', 'Retry-After'],
@@ -70,6 +76,26 @@ const createApp = () => {
       });
     }
   });
+
+  // Razorpay test checkout page, served from the API's own origin so the browser makes
+  // same-origin calls (the AppSail gateway answers CORS preflights without CORS headers).
+  const paymentPage = path.join(__dirname, '..', 'payment.html');
+  if (fs.existsSync(paymentPage)) {
+    app.get(
+      ['/payment', '/payment.html'],
+      helmet.contentSecurityPolicy({
+        directives: {
+          defaultSrc: ["'self'"],
+          scriptSrc: ["'self'", "'unsafe-inline'", 'https://checkout.razorpay.com'],
+          styleSrc: ["'self'", "'unsafe-inline'"],
+          connectSrc: ["'self'", 'https://*.razorpay.com'],
+          frameSrc: ['https://*.razorpay.com'],
+          imgSrc: ["'self'", 'data:', 'https://*.razorpay.com'],
+        },
+      }),
+      (req, res) => res.sendFile(paymentPage),
+    );
+  }
 
   if (config.apiDocsEnabled) {
     const specPath = path.join(__dirname, '..', 'docs', 'openapi.yaml');
