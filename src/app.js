@@ -97,6 +97,23 @@ const createApp = () => {
     );
   }
 
+  // Land verification test form; fields are built from GET /land-verification/states.
+  const landPage = path.join(__dirname, '..', 'land.html');
+  if (fs.existsSync(landPage)) {
+    app.get(
+      ['/land', '/land.html'],
+      helmet.contentSecurityPolicy({
+        directives: {
+          defaultSrc: ["'self'"],
+          scriptSrc: ["'self'", "'unsafe-inline'"],
+          styleSrc: ["'self'", "'unsafe-inline'"],
+          connectSrc: ["'self'"],
+        },
+      }),
+      (req, res) => res.sendFile(landPage),
+    );
+  }
+
   if (config.apiDocsEnabled) {
     const specPath = path.join(__dirname, '..', 'docs', 'openapi.yaml');
     if (fs.existsSync(specPath)) {

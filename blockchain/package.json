@@ -1,0 +1,17 @@
+{
+  "name": "bhoomiscan-blockchain",
+  "version": "1.0.0",
+  "private": true,
+  "description": "LandVerification smart contract (BNB Smart Chain) used by the API's bsc smart-contract provider.",
+  "scripts": {
+    "compile": "hardhat compile",
+    "test": "hardhat test",
+    "deploy:bsc-testnet": "hardhat run scripts/deployLandVerification.js --network bscTestnet",
+    "deploy:bsc-mainnet": "hardhat run scripts/deployLandVerification.js --network bscMainnet"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "dotenv": "^16.4.5",
+    "hardhat": "^2.22.0"
+  }
+}

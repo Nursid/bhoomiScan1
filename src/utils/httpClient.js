@@ -15,6 +15,7 @@
 const { ProviderError } = require('./errors');
 const logger = require('./logger');
 const apiAudit = require('./apiAudit');
+const requestContext = require('./requestContext');
 
 const RETRYABLE_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
 const MAX_RETRY_AFTER_MS = 10_000;
@@ -99,6 +100,7 @@ const createHttpClient = (options) => {
    * @param {boolean} [req.retryOnTimeout] default true only when retries > 0 and method is GET
    * @param {string} [req.operation]       audit label
    * @param {*}      [req.auditRequestBody] override what gets stored for the request
+   * @param {object} [req.logFields]       extra safe fields for log lines (e.g. { state })
    * @returns {Promise<{status:number, body:*, headers:Headers, durationMs:number, reference:string|null}>}
    */
   const request = async (req) => {
@@ -162,8 +164,11 @@ const createHttpClient = (options) => {
         attempt,
       });
 
+      // Bodies and headers are never logged: they may hold tokens or land-record data.
+      const logContext = { provider, ...(req.logFields || {}), operation, method, endpoint, requestId: requestContext.get().requestId || null };
+
       if (!failure) {
-        logger.debug({ provider, operation, status: response.status, durationMs, attempt }, 'provider call ok');
+        logger.info({ ...logContext, status: response.status, success: true, durationMs, attempt }, 'provider call ok');
         return { status: response.status, body, headers: response.headers, durationMs, reference };
       }
 
@@ -175,9 +180,9 @@ const createHttpClient = (options) => {
 
       logger.warn(
         {
-          provider,
-          operation,
+          ...logContext,
           status: response?.status ?? null,
+          success: false,
           code: error.code,
           providerMessage: error.providerMessage,
           durationMs,

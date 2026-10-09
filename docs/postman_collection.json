@@ -947,6 +947,328 @@
       ]
     },
     {
+      "name": "Land Verification - Maharashtra",
+      "item": [
+        {
+          "name": "Districts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/land-verification/maharashtra/districts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "land-verification",
+                "maharashtra",
+                "districts"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Talukas",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/land-verification/maharashtra/talukas",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "land-verification",
+                "maharashtra",
+                "talukas"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"district\": \"पुणे\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Villages",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/land-verification/maharashtra/villages",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "land-verification",
+                "maharashtra",
+                "villages"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"district\": \"पुणे\",\n  \"taluka\": \"आंबेगाव\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Survey numbers",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/land-verification/maharashtra/survey-numbers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "land-verification",
+                "maharashtra",
+                "survey-numbers"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"district\": \"पुणे\",\n  \"taluka\": \"आंबेगाव\",\n  \"village\": \"अडिवरे\",\n  \"survey_part_number\": \"1\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Verify land",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/land-verification/maharashtra/verify",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "land-verification",
+                "maharashtra",
+                "verify"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"district\": \"पुणे\",\n  \"taluka\": \"आंबेगाव\",\n  \"village\": \"अडिवरे\",\n  \"survey_part_number\": \"1\",\n  \"survey_number\": \"1\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Land Verification - Bihar",
+      "item": [
+        {
+          "name": "Districts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/land-verification/bihar/districts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "land-verification",
+                "bihar",
+                "districts"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Anchals",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/land-verification/bihar/anchals",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "land-verification",
+                "bihar",
+                "anchals"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"district\": \"araria\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Lights",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/land-verification/bihar/lights",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "land-verification",
+                "bihar",
+                "lights"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"district\": \"araria\",\n  \"anchal\": \"araria\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Mouzas",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/land-verification/bihar/mouzas",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "land-verification",
+                "bihar",
+                "mouzas"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"district\": \"araria\",\n  \"anchal\": \"araria\",\n  \"light\": \"अररिया बस्ती\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Verify land",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/land-verification/bihar/verify",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "land-verification",
+                "bihar",
+                "verify"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"district\": \"araria\",\n  \"anchal\": \"araria\",\n  \"light\": \"अररिया बस्ती\",\n  \"mouza\": \"अररिया बस्ती - 214/1\",\n  \"plot_number\": \"1\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "Smart Contract",
       "item": [
         {

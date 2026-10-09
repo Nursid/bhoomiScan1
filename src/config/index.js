@@ -86,6 +86,8 @@ const schema = z.object({
 
   SUREPASS_BASE_URL: url('https://sandbox.surepass.io'),
   SUREPASS_TOKEN: str(''),
+  // Alias accepted for SUREPASS_TOKEN; SUREPASS_TOKEN wins when both are set.
+  SUREPASS_API_TOKEN: str(''),
   SUREPASS_TIMEOUT_MS: int(30000, { min: 1000 }),
   SUREPASS_METADATA_RETRIES: int(2),
   SUREPASS_VERIFY_RETRIES: int(0),
@@ -191,7 +193,7 @@ const config = {
 
   surepass: {
     baseUrl: env.SUREPASS_BASE_URL,
-    token: env.SUREPASS_TOKEN,
+    token: env.SUREPASS_TOKEN || env.SUREPASS_API_TOKEN,
     timeoutMs: env.SUREPASS_TIMEOUT_MS,
     metadataRetries: env.SUREPASS_METADATA_RETRIES,
     verifyRetries: env.SUREPASS_VERIFY_RETRIES,

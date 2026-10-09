@@ -4,8 +4,10 @@
  * Every state adapter implements the same contract, which is all that
  * land-verification.service knows about providers:
  *
- *   stateCode, slug, provider, normalizerVersion
+ *   stateCode, slug, label, provider, normalizerVersion
  *   metadataLevels                 { level: { filters: [...] } }  (order = drill-down)
+ *   filterSchemas                  zod schema per metadata filter field
+ *   fields                         ordered form fields for clients (see GET /states)
  *   locatorSchema                  zod schema for the verify body
  *   listOptions(level, filters)    -> [{ value, label }]
  *   fetchRecord(locator)           -> { raw, record, providerReference, providerRequestId }
@@ -15,24 +17,17 @@
  *   propertyId(locator)            -> stable id sent to the smart contract
  *   displayName(locator)
  *
- * Adding Haryana/UP = a new adapter file + one line in the registry.
+ * Adding a state = a new adapter file + one line in the registry
+ * (see maharashtra-surepass.adapter.js, bihar-surepass.adapter.js).
  */
 
 const { z } = require('zod');
 const { SurepassLandProvider } = require('../../../integrations/surepass/surepass-land.provider');
 const { normalizeRecord } = require('../land-record-normalizer');
 const { resolveIgnoredFields } = require('../land-record-ignore');
+const { text } = require('./adapter-helpers');
 
 const NORMALIZER_VERSION = 'surepass-punjab@1';
-
-const text = (name, max = 120) =>
-  z
-    .string({ required_error: `${name} is required`, invalid_type_error: `${name} must be a string` })
-    .trim()
-    .min(1, `${name} is required`)
-    .max(max, `${name} is too long`)
-    // Letters (any script), digits, spaces and the punctuation real names use.
-    .regex(/^[\p{L}\p{M}\p{N} .,'()&_-]+$/u, `${name} contains invalid characters`);
 
 const year = z
   .string({ required_error: 'year is required' })
@@ -64,6 +59,15 @@ const metadataLevels = {
   years: { filters: ['district', 'tehsil', 'village'] },
   khasras: { filters: ['district', 'tehsil', 'village', 'year'] },
 };
+
+// Form order = drill-down order. `source` names the metadata level that lists the options.
+const fields = [
+  { name: 'district', label: 'District', input: 'select', source: 'districts' },
+  { name: 'tehsil', label: 'Tehsil', input: 'select', source: 'tehsils' },
+  { name: 'village', label: 'Village', input: 'select', source: 'villages' },
+  { name: 'year', label: 'Year', input: 'select', source: 'years' },
+  { name: 'khasra_number', label: 'Khasra Number', input: 'select', source: 'khasras' },
+];
 
 const filterSchemas = {
   district: text('district'),
@@ -109,10 +113,12 @@ const normalizeOptions = { ignoredFields: diffOptions.ignoredFields, orderedArra
 const createPunjabSurepassAdapter = ({ provider = new SurepassLandProvider() } = {}) => ({
   stateCode: 'PUNJAB',
   slug: 'punjab',
+  label: 'Punjab',
   provider: 'SUREPASS',
   normalizerVersion: NORMALIZER_VERSION,
   metadataLevels,
   filterSchemas,
+  fields,
   locatorSchema,
   diffOptions,
 

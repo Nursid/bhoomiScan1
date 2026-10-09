@@ -71,6 +71,49 @@ diffOptions                      parcelIdentity(locator)   propertyId(locator)  
 ```
 
 Routes take a `:state` parameter (`/land-verification/punjab/verify`), and `providers/registry.js` resolves it to an adapter.
+Metadata lists are `POST /:state/:level`. The level must exist in that adapter's `metadataLevels`; otherwise the
+API answers 404 `METADATA_LEVEL_NOT_FOUND`.
+
+### State-specific integrations (Punjab, Maharashtra, Bihar)
+
+```
+                     /land-verification/:state/...
+                                  |
+                         providers/registry.js
+           +----------------------+----------------------+
+           v                      v                      v
+  punjab-surepass.adapter  maharashtra-surepass.adapter  bihar-surepass.adapter   <- state contract: hierarchy,
+           |                      |                      |                          zod schemas, form fields,
+           v                      v                      v                          identity, critical fields
+  SurepassLandProvider   SurepassMaharashtraLand...  SurepassBiharLand...         <- endpoint paths + payloads
+           +------------ extends SurepassStateLandProvider -------------+          (surepass-land.base.js)
+                                  |
+                           SurepassClient                                       <- token, base URL, error mapping
+                                  |
+                           utils/httpClient                                     <- timeout, retries, logging,
+                                  |                                               request id, audit rows
+                     https://kyc-api.surepass.app
+```
+
+| State | Lists (`metadataLevels`) | Locator (verify body) | Surepass |
+|---|---|---|---|
+| punjab | districts → tehsils → villages → years → khasras | district, tehsil, village, year, khasra_number | `/punjab/meta/{district,tehsil,village,year,khasra-number}-list`, `/punjab` |
+| maharashtra | districts → talukas → villages → survey-numbers | district, taluka, village, survey_part_number, survey_number | `/maharashtra/meta/{district,taluka,village,survey-number}-list`, `/maharashtra` |
+| bihar | districts → anchals → lights → mouzas | district, anchal, light, mouza, plot_number | `/bihar/meta/{district,anchal,light,mouza}-list`, `/bihar` |
+
+* Each state keeps its own vocabulary end to end: request schema, stored locator, parcel key, smart-contract
+  property id (`PB:…`, `MH:…`, `BR:…`) and Surepass payload. No field is mapped onto another state's
+  field (e.g. `survey_number` is never stored as `khasra_number`, and Bihar's `light` is used verbatim).
+* Schemas are strict, so a field from another state is a 422. Child lists validate their parent fields
+  before any provider call.
+* `survey_part_number` and `plot_number` have no Surepass list endpoint, so they are free-text fields.
+  None was invented.
+* Verify responses share one application shape (`status`, `changes`, `record`, `source.state`, …). The
+  untouched Surepass envelope is stored per snapshot (`rawResponse`, returned by
+  `GET /:id/history/:snapshotId`). When a metadata or verify response has an unexpected shape, its
+  structure (keys and types, no values) is logged as a warning.
+* `GET /states` returns each state's `fields` (name, label, select/text, `dependsOn`, options endpoint).
+  `land.html` (served at `/land`) renders the form from it, with no per-state UI code.
 To add *Haryana → another provider*, write a new integration client plus one adapter file, and register it with one
 line. No business logic, schema or route changes. Locators are stored as JSON, so each state can have its own fields.
 
@@ -206,7 +249,7 @@ moved to BullMQ later without changing the services. Redis is optional and is us
 | GET | `/payments` | auth |
 | GET | `/land-verification/states` | auth |
 | GET | `/land-verification/:state/districts` | auth + subscription |
-| POST | `/land-verification/:state/tehsils` · `villages` · `years` · `khasras` | auth + subscription |
+| POST | `/land-verification/:state/:level`: punjab `tehsils` · `villages` · `years` · `khasras`; maharashtra `talukas` · `villages` · `survey-numbers`; bihar `anchals` · `lights` · `mouzas` | auth + subscription |
 | POST | `/land-verification/:state/verify` | auth + subscription, rate-limited per user |
 | GET | `/land-verification`, `/:id`, `/:id/history`, `/:id/history/:snapshotId`, `/:id/changes` | auth (history stays readable after a subscription ends) |
 | PUT | `/land-verification/:id/monitoring` | auth (+ subscription to enable) |
@@ -230,7 +273,9 @@ src/
   utils/                          errors, logger (redacting), httpClient, apiAudit, cache, canonicalJson,
                                   mobile, dates, sanitize, response, requestContext
   integrations/
-    surepass/                     surepass.client.js, surepass-land.provider.js
+    surepass/                     surepass.client.js, surepass-land.base.js (shared state provider),
+                                  surepass-land.provider.js (Punjab), surepass-maharashtra-land.provider.js,
+                                  surepass-bihar-land.provider.js
     razorpay/                     razorpay.client.js
     msg91/                        msg91.client.js
     smart-contract/               index.js (factory), http.provider.js, bsc.provider.js
@@ -241,7 +286,8 @@ src/
     payments/                     routes, controller, service
     land-verification/            routes, controller, service, land-metadata.service,
                                   land-record-normalizer, land-record-ignore, land-record-diff.service,
-                                  verification-schedule, providers/{registry, punjab-surepass.adapter}
+                                  verification-schedule, providers/{registry, adapter-helpers,
+                                  punjab-surepass.adapter, maharashtra-surepass.adapter, bihar-surepass.adapter}
     smart-contract/               routes, service
     alerts/                       routes, service
   jobs/                           scheduler, worker, recurring-verification.job

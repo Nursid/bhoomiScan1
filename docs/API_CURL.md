@@ -127,8 +127,27 @@ curl -s -X POST http://localhost:4000/api/v1/payments/webhook \
 
 ## 4. Land metadata (requires an active subscription)
 
+Each state has its own hierarchy and field names. `GET /states` returns every
+state's form fields in drill-down order. A child list is only accepted when all
+of its parent fields are present; otherwise the API answers `422 VALIDATION_FAILED`
+without calling Surepass.
+
+| State | Hierarchy (metadata lists) | Verify body |
+|---|---|---|
+| punjab | districts → tehsils → villages → years → khasras | district, tehsil, village, year, khasra_number |
+| maharashtra | districts → talukas → villages → survey-numbers | district, taluka, village, survey_part_number, survey_number |
+| bihar | districts → anchals → lights → mouzas | district, anchal, light, mouza, plot_number |
+
+`survey_part_number` (Maharashtra) and `plot_number` (Bihar) are typed by the
+user, because Surepass has no list endpoint for them.
+
 ```bash
 curl -s http://localhost:4000/api/v1/land-verification/states -H "$AUTH"
+```
+
+### Punjab
+
+```bash
 
 curl -s http://localhost:4000/api/v1/land-verification/punjab/districts -H "$AUTH"
 
@@ -149,6 +168,42 @@ curl -s -X POST http://localhost:4000/api/v1/land-verification/punjab/khasras -H
   -d '{ "district": "amritsar", "tehsil": "ajnala", "village": "abu said", "year": "2020 - 2021" }'
 ```
 
+### Maharashtra
+
+```bash
+curl -s http://localhost:4000/api/v1/land-verification/maharashtra/districts -H "$AUTH"
+
+curl -s -X POST http://localhost:4000/api/v1/land-verification/maharashtra/talukas -H "$AUTH" \
+  -H "Content-Type: application/json" \
+  -d '{ "district": "पुणे" }'
+
+curl -s -X POST http://localhost:4000/api/v1/land-verification/maharashtra/villages -H "$AUTH" \
+  -H "Content-Type: application/json" \
+  -d '{ "district": "पुणे", "taluka": "आंबेगाव" }'
+
+curl -s -X POST http://localhost:4000/api/v1/land-verification/maharashtra/survey-numbers -H "$AUTH" \
+  -H "Content-Type: application/json" \
+  -d '{ "district": "पुणे", "taluka": "आंबेगाव", "village": "अडिवरे", "survey_part_number": "1" }'
+```
+
+### Bihar
+
+```bash
+curl -s http://localhost:4000/api/v1/land-verification/bihar/districts -H "$AUTH"
+
+curl -s -X POST http://localhost:4000/api/v1/land-verification/bihar/anchals -H "$AUTH" \
+  -H "Content-Type: application/json" \
+  -d '{ "district": "araria" }'
+
+curl -s -X POST http://localhost:4000/api/v1/land-verification/bihar/lights -H "$AUTH" \
+  -H "Content-Type: application/json" \
+  -d '{ "district": "araria", "anchal": "araria" }'
+
+curl -s -X POST http://localhost:4000/api/v1/land-verification/bihar/mouzas -H "$AUTH" \
+  -H "Content-Type: application/json" \
+  -d '{ "district": "araria", "anchal": "araria", "light": "अररिया बस्ती" }'
+```
+
 ## 5. Verify land
 
 The first call returns `VERIFIED`. Later calls return `UNCHANGED`, or `CHANGED` along with the list of changes.
@@ -163,6 +218,43 @@ curl -s -X POST http://localhost:4000/api/v1/land-verification/punjab/verify -H 
     "year": "2020 - 2021",
     "khasra_number": "14//6/2---1"
   }'
+
+curl -s -X POST http://localhost:4000/api/v1/land-verification/maharashtra/verify -H "$AUTH" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "district": "पुणे",
+    "taluka": "आंबेगाव",
+    "village": "अडिवरे",
+    "survey_part_number": "1",
+    "survey_number": "1"
+  }'
+
+curl -s -X POST http://localhost:4000/api/v1/land-verification/bihar/verify -H "$AUTH" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "district": "araria",
+    "anchal": "araria",
+    "light": "अररिया बस्ती",
+    "mouza": "अररिया बस्ती - 214/1",
+    "plot_number": "1"
+  }'
+```
+
+Invalid requests are rejected before Surepass is called, for example:
+
+```bash
+# Maharashtra without taluka -> 422, field "taluka"
+curl -s -X POST http://localhost:4000/api/v1/land-verification/maharashtra/villages -H "$AUTH" \
+  -H "Content-Type: application/json" -d '{ "district": "पुणे" }'
+
+# Punjab field on a Bihar request -> 422 (unknown key)
+curl -s -X POST http://localhost:4000/api/v1/land-verification/bihar/verify -H "$AUTH" \
+  -H "Content-Type: application/json" \
+  -d '{ "district": "araria", "anchal": "araria", "light": "अररिया बस्ती", "mouza": "अररिया बस्ती - 214/1", "plot_number": "1", "khasra_number": "1" }'
+
+# A list that does not exist for the state -> 404 METADATA_LEVEL_NOT_FOUND
+curl -s -X POST http://localhost:4000/api/v1/land-verification/bihar/tehsils -H "$AUTH" \
+  -H "Content-Type: application/json" -d '{ "district": "araria" }'
 ```
 
 ```bash

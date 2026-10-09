@@ -1,6 +1,12 @@
 /**
- * Drill-down metadata (districts -> tehsils -> villages -> years -> khasras),
- * cached (Redis or memory) because it changes rarely and provider calls cost money.
+ * Drill-down metadata, cached (Redis or memory) because it changes rarely and
+ * provider calls cost money. Levels and their required parent filters are
+ * state-specific (adapter.metadataLevels), e.g.
+ *   punjab:      districts -> tehsils -> villages -> years -> khasras
+ *   maharashtra: districts -> talukas -> villages -> survey-numbers
+ *   bihar:       districts -> anchals -> lights -> mouzas
+ * Filters are validated before any provider call, so a child list is never
+ * requested with a missing parent. Cache keys include state, level and every filter.
  */
 
 const { z } = require('zod');

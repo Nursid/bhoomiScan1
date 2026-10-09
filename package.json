@@ -12,6 +12,10 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",
     "db:seed": "node prisma/seed.js",
+    "contract:install": "npm --prefix blockchain install",
+    "contract:test": "npm --prefix blockchain test",
+    "contract:deploy:bsc-testnet": "npm --prefix blockchain run deploy:bsc-testnet",
+    "contract:deploy:bsc-mainnet": "npm --prefix blockchain run deploy:bsc-mainnet",
     "test": "jest --runInBand",
     "test:unit": "jest tests/unit",
     "test:integration": "jest tests/integration --runInBand"

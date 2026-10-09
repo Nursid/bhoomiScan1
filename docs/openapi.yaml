@@ -75,12 +75,19 @@ components:
       type: object
       properties:
         state: { type: string }
-        level: { type: string, enum: [districts, tehsils, villages, years, khasras] }
+        level:
+          type: string
+          description: |
+            State-specific list name.
+            punjab: districts, tehsils, villages, years, khasras.
+            maharashtra: districts, talukas, villages, survey-numbers.
+            bihar: districts, anchals, lights, mouzas.
         filters: { type: object }
         options: { type: array, items: { $ref: '#/components/schemas/Option' } }
         count: { type: integer }
         cached: { type: boolean }
     Locator:
+      description: Punjab locator (`POST /land-verification/punjab/verify`).
       type: object
       required: [district, tehsil, village, year, khasra_number]
       additionalProperties: false
@@ -90,6 +97,28 @@ components:
         village: { type: string, example: abu said }
         year: { type: string, example: 2020 - 2021 }
         khasra_number: { type: string, example: 14//6/2---1 }
+    MaharashtraLocator:
+      description: Maharashtra locator (`POST /land-verification/maharashtra/verify`). Uses survey-number terminology; Punjab fields are rejected.
+      type: object
+      required: [district, taluka, village, survey_part_number, survey_number]
+      additionalProperties: false
+      properties:
+        district: { type: string, example: पुणे }
+        taluka: { type: string, example: आंबेगाव }
+        village: { type: string, example: अडिवरे }
+        survey_part_number: { type: string, example: '1', description: Entered by the user (Surepass has no list for it). }
+        survey_number: { type: string, example: '1' }
+    BiharLocator:
+      description: Bihar locator (`POST /land-verification/bihar/verify`). `light` is Surepass's field name, used verbatim.
+      type: object
+      required: [district, anchal, light, mouza, plot_number]
+      additionalProperties: false
+      properties:
+        district: { type: string, example: araria }
+        anchal: { type: string, example: araria }
+        light: { type: string, example: अररिया बस्ती }
+        mouza: { type: string, example: अररिया बस्ती - 214/1 }
+        plot_number: { type: string, example: '1', description: Entered by the user (Surepass has no list for it). }
     User:
       type: object
       properties:
@@ -468,7 +497,12 @@ paths:
   /api/v1/land-verification/states:
     get:
       tags: [Land Verification]
-      summary: Supported states and their providers
+      summary: Supported states, their providers and their form fields
+      description: |
+        Each state lists its `fields` in drill-down order. A field has `name`, `label`,
+        `input` (`select` or `text`), `dependsOn` (fields that must be filled first) and,
+        for selects, `options` = { method, path, body } describing the list endpoint and
+        which field values to send. Clients build the form from this instead of hardcoding it.
       responses:
         '200': { description: OK }
 
@@ -496,7 +530,7 @@ paths:
   /api/v1/land-verification/{state}/tehsils:
     post:
       tags: [Land Verification]
-      summary: Tehsil list
+      summary: Tehsil list (Punjab)
       parameters: [{ $ref: '#/components/parameters/State' }]
       requestBody:
         content:
@@ -509,7 +543,7 @@ paths:
   /api/v1/land-verification/{state}/villages:
     post:
       tags: [Land Verification]
-      summary: Village list
+      summary: Village list (Punjab)
       parameters: [{ $ref: '#/components/parameters/State' }]
       requestBody:
         content:
@@ -525,7 +559,7 @@ paths:
   /api/v1/land-verification/{state}/years:
     post:
       tags: [Land Verification]
-      summary: Year list
+      summary: Year list (Punjab)
       parameters: [{ $ref: '#/components/parameters/State' }]
       requestBody:
         content:
@@ -544,7 +578,7 @@ paths:
   /api/v1/land-verification/{state}/khasras:
     post:
       tags: [Land Verification]
-      summary: Khasra number list
+      summary: Khasra number list (Punjab)
       parameters: [{ $ref: '#/components/parameters/State' }]
       requestBody:
         content:
@@ -561,16 +595,136 @@ paths:
         '200': { description: OK }
         '422': { $ref: '#/components/responses/Error' }
 
+  /api/v1/land-verification/maharashtra/talukas:
+    post:
+      tags: [Land Verification]
+      summary: Maharashtra taluka list
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [district]
+              properties:
+                district: { type: string, example: पुणे }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: object, properties: { data: { $ref: '#/components/schemas/MetadataResult' } } } } } }
+        '404': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+
+  /api/v1/land-verification/maharashtra/villages:
+    post:
+      tags: [Land Verification]
+      summary: Maharashtra village list
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [district, taluka]
+              properties:
+                district: { type: string, example: पुणे }
+                taluka: { type: string, example: आंबेगाव }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: object, properties: { data: { $ref: '#/components/schemas/MetadataResult' } } } } } }
+        '404': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+
+  /api/v1/land-verification/maharashtra/survey-numbers:
+    post:
+      tags: [Land Verification]
+      summary: Maharashtra survey number list
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [district, taluka, village, survey_part_number]
+              properties:
+                district: { type: string, example: पुणे }
+                taluka: { type: string, example: आंबेगाव }
+                village: { type: string, example: अडिवरे }
+                survey_part_number: { type: string, example: '1' }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: object, properties: { data: { $ref: '#/components/schemas/MetadataResult' } } } } } }
+        '404': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+
+  /api/v1/land-verification/bihar/anchals:
+    post:
+      tags: [Land Verification]
+      summary: Bihar anchal list
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [district]
+              properties:
+                district: { type: string, example: araria }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: object, properties: { data: { $ref: '#/components/schemas/MetadataResult' } } } } } }
+        '404': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+
+  /api/v1/land-verification/bihar/lights:
+    post:
+      tags: [Land Verification]
+      summary: Bihar light list
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [district, anchal]
+              properties:
+                district: { type: string, example: araria }
+                anchal: { type: string, example: araria }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: object, properties: { data: { $ref: '#/components/schemas/MetadataResult' } } } } } }
+        '404': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+
+  /api/v1/land-verification/bihar/mouzas:
+    post:
+      tags: [Land Verification]
+      summary: Bihar mouza list
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [district, anchal, light]
+              properties:
+                district: { type: string, example: araria }
+                anchal: { type: string, example: araria }
+                light: { type: string, example: अररिया बस्ती }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: object, properties: { data: { $ref: '#/components/schemas/MetadataResult' } } } } } }
+        '404': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+
   /api/v1/land-verification/{state}/verify:
     post:
       tags: [Land Verification]
       summary: Verify a land record (stores snapshot, compares with previous, anchors)
+      description: The body is the state's own locator; fields of other states are rejected with 422.
       parameters: [{ $ref: '#/components/parameters/State' }]
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/Locator' }
+            schema:
+              oneOf:
+                - { $ref: '#/components/schemas/Locator' }
+                - { $ref: '#/components/schemas/MaharashtraLocator' }
+                - { $ref: '#/components/schemas/BiharLocator' }
       responses:
         '200':
           description: Verified

@@ -1,14 +1,22 @@
 const registry = require('./providers/registry');
 const metadataService = require('./land-metadata.service');
 const service = require('./land-verification.service');
-const { AppError } = require('../../utils/errors');
+const { AppError, notFound } = require('../../utils/errors');
 const { ok, paginationParams, paginationMeta } = require('../../utils/response');
 
 const states = async (req, res) => ok(res, { states: registry.listStates() });
 
-/** GET /:state/districts, POST /:state/{tehsils|villages|years|khasras} */
-const metadata = (level) => async (req, res) => {
+/**
+ * GET /:state/districts (fixed level), POST /:state/:level (level from the URL).
+ * Lists without parent filters are GET-only; lists with filters are POST-only.
+ */
+const metadata = (fixedLevel) => async (req, res) => {
   const adapter = registry.getAdapter(req.params.state);
+  const level = fixedLevel || req.params.level;
+  const definition = Object.hasOwn(adapter.metadataLevels, level) ? adapter.metadataLevels[level] : null;
+  if (!definition || (req.method === 'GET') !== (definition.filters.length === 0)) {
+    throw notFound(`Unknown list "${level}" for state "${adapter.slug}"`, 'METADATA_LEVEL_NOT_FOUND');
+  }
   ok(res, await metadataService.listOptions(adapter, level, req.method === 'GET' ? {} : req.body));
 };
 
