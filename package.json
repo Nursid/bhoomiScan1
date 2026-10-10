@@ -18,7 +18,9 @@
     "contract:deploy:bsc-mainnet": "npm --prefix blockchain run deploy:bsc-mainnet",
     "test": "jest --runInBand",
     "test:unit": "jest tests/unit",
-    "test:integration": "jest tests/integration --runInBand"
+    "test:integration": "jest tests/integration --runInBand",
+    "surepass:check": "node scripts/surepass-live-check.js",
+    "docs:apidog": "node scripts/generate-apidog-openapi.js"
   },
   "prisma": {
     "seed": "node prisma/seed.js"

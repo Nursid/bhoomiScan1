@@ -100,6 +100,11 @@ API answers 404 `METADATA_LEVEL_NOT_FOUND`.
 | punjab | districts → tehsils → villages → years → khasras | district, tehsil, village, year, khasra_number | `/punjab/meta/{district,tehsil,village,year,khasra-number}-list`, `/punjab` |
 | maharashtra | districts → talukas → villages → survey-numbers | district, taluka, village, survey_part_number, survey_number | `/maharashtra/meta/{district,taluka,village,survey-number}-list`, `/maharashtra` |
 | bihar | districts → anchals → lights → mouzas | district, anchal, light, mouza, plot_number | `/bihar/meta/{district,anchal,light,mouza}-list`, `/bihar` |
+| gujarat, madhya-pradesh, uttarakhand, delhi, andaman-and-nicobar, goa, chhattisgarh, telangana, sikkim, tripura | see `docs/API_CURL.md` §4 | per state | `/<slug>/meta/<list>`, `/<slug>` |
+
+* The last ten are declarative: each `<state>-surepass.adapter.js` is a spec (levels → Surepass list
+  names, field schemas, form fields) turned into a full adapter by `surepass-state-adapter.js`, using the
+  shared `SurepassStateLandProvider` directly. The verify body is exactly the form fields, in order.
 
 * Each state keeps its own vocabulary end to end: request schema, stored locator, parcel key, smart-contract
   property id (`PB:…`, `MH:…`, `BR:…`) and Surepass payload. No field is mapped onto another state's

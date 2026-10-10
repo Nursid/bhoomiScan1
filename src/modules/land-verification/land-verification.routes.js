@@ -17,6 +17,8 @@
  *   bihar:       /anchals { district }  /lights { district, anchal }
  *                /mouzas { district, anchal, light }
  *                /verify { district, anchal, light, mouza, plot_number }
+ *   gujarat, madhya-pradesh, uttarakhand, delhi, andaman-and-nicobar, goa,
+ *   chhattisgarh, telangana, sikkim, tripura: see providers/registry.js
  *
  *   GET  /                    my parcels
  *   GET  /:id

@@ -52,6 +52,7 @@ curl localhost:4000/api/auth/me -H "Authorization: Bearer <token>"
    * punjab: `/tehsils`, `/villages`, `/years`, `/khasras`
    * maharashtra: `/talukas`, `/villages`, `/survey-numbers` (with a user-entered `survey_part_number`)
    * bihar: `/anchals`, `/lights`, `/mouzas` (then a user-entered `plot_number`)
+   * gujarat, madhya-pradesh, uttarakhand, delhi, andaman-and-nicobar, goa, chhattisgarh, telangana, sikkim, tripura: see the table in [docs/API_CURL.md](docs/API_CURL.md)
 7. Verify: `POST /land-verification/<state>/verify` with that state's own fields (see [docs/API_CURL.md](docs/API_CURL.md)). The first call returns `VERIFIED`. Later calls return `UNCHANGED`, or `CHANGED` with a change list and an alert.
 
 A test form that builds itself from `GET /states` is served at `/land`. It asks for your login token; the Surepass token never leaves the server.

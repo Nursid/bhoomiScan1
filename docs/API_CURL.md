@@ -137,9 +137,34 @@ without calling Surepass.
 | punjab | districts → tehsils → villages → years → khasras | district, tehsil, village, year, khasra_number |
 | maharashtra | districts → talukas → villages → survey-numbers | district, taluka, village, survey_part_number, survey_number |
 | bihar | districts → anchals → lights → mouzas | district, anchal, light, mouza, plot_number |
+| gujarat | districts → talukas → villages → blocks | district, taluka, village, block, owner_name |
+| madhya-pradesh | districts → tehsils → villages → khasras | district, tehsil, village, khasra |
+| uttarakhand | districts → tehsils → villages → years → khatas | district, tehsil, village, year, khata |
+| delhi | districts → tehsils → villages → khata-numbers | district, tehsil, village, khata_no |
+| andaman-and-nicobar | districts → tehsils → villages → survey-numbers | district, tehsil, village, survey_number |
+| goa | districts → talukas → villages → survey-numbers → subdivision-numbers | district, taluka, village, survey_number, subdivision_number |
+| chhattisgarh | districts → tehsils → villages | district, tehsil, village, khasra_number |
+| telangana | districts → mandals → villages → survey-numbers → khata-numbers | district, mandal, village, survey_number, khata_number |
+| sikkim | districts → subdivisions → revenue-circles → revenue-blocks | district, subdivision, revenue_circle, revenue_block, plot_number |
+| tripura | districts → subdivisions → revenue-circles → tehsils → moujas | district, subdivision, revenue_circle, tehsil, mouja, khatian_number |
 
-`survey_part_number` (Maharashtra) and `plot_number` (Bihar) are typed by the
-user, because Surepass has no list endpoint for them.
+`survey_part_number` (Maharashtra), `plot_number` (Bihar, Sikkim), `owner_name`
+(Gujarat), `khasra_number` (Chhattisgarh) and `khatian_number` (Tripura) are
+typed by the user, because there is no (documented) Surepass list for them.
+Every other field is a dropdown fed by the list before it. Each list's body is
+exactly the fields before it in the verify body, e.g.
+
+```bash
+curl -s http://localhost:4000/api/v1/land-verification/goa/districts -H "$AUTH"
+
+curl -s -X POST http://localhost:4000/api/v1/land-verification/goa/subdivision-numbers -H "$AUTH" \
+  -H "Content-Type: application/json" \
+  -d '{ "district": "kushavati", "taluka": "canacona", "village": "agonda", "survey_number": "28" }'
+
+curl -s -X POST http://localhost:4000/api/v1/land-verification/tripura/moujas -H "$AUTH" \
+  -H "Content-Type: application/json" \
+  -d '{ "district": "উত্তর ত্রিপুরা/north tripura", "subdivision": "পানিসাগর/panisagar", "revenue_circle": "পানিসাগর/panisagar", "tehsil": "পানিসাগর/panisagar" }'
+```
 
 ```bash
 curl -s http://localhost:4000/api/v1/land-verification/states -H "$AUTH"
@@ -238,6 +263,15 @@ curl -s -X POST http://localhost:4000/api/v1/land-verification/bihar/verify -H "
     "mouza": "अररिया बस्ती - 214/1",
     "plot_number": "1"
   }'
+
+# The other states take their own verify body (see the table in section 4), e.g.
+curl -s -X POST http://localhost:4000/api/v1/land-verification/gujarat/verify -H "$AUTH" \
+  -H "Content-Type: application/json" \
+  -d '{ "district": "sabarkantha", "taluka": "prantij", "village": "kamalpur", "block": "14", "owner_name": "SHANUBHAI" }'
+
+curl -s -X POST http://localhost:4000/api/v1/land-verification/telangana/verify -H "$AUTH" \
+  -H "Content-Type: application/json" \
+  -d '{ "district": "adilabad", "mandal": "adilabad (rural)", "village": "ankapoor", "survey_number": "2/1", "khata_number": "1" }'
 ```
 
 Invalid requests are rejected before Surepass is called, for example:

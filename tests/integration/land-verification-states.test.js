@@ -71,7 +71,8 @@ describe('state-specific land verification', () => {
     const res = await app.get(`${LV}/states`).set(user.auth);
     expect(res.status).toBe(200);
     const states = Object.fromEntries(res.body.data.states.map((s) => [s.slug, s.fields.map((f) => f.name)]));
-    expect(states).toEqual({
+    // The remaining Surepass states are covered by land-verification-more-states.test.js.
+    expect(states).toMatchObject({
       punjab: ['district', 'tehsil', 'village', 'year', 'khasra_number'],
       maharashtra: ['district', 'taluka', 'village', 'survey_part_number', 'survey_number'],
       bihar: ['district', 'anchal', 'light', 'mouza', 'plot_number'],

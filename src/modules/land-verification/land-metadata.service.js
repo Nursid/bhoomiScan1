@@ -5,6 +5,7 @@
  *   punjab:      districts -> tehsils -> villages -> years -> khasras
  *   maharashtra: districts -> talukas -> villages -> survey-numbers
  *   bihar:       districts -> anchals -> lights -> mouzas
+ *   goa:         districts -> talukas -> villages -> survey-numbers -> subdivision-numbers  (etc., see registry.js)
  * Filters are validated before any provider call, so a child list is never
  * requested with a missing parent. Cache keys include state, level and every filter.
  */

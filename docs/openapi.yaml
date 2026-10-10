@@ -276,7 +276,7 @@ paths:
                       lastLoginAt: { type: string, format: date-time }
         '400': { description: 'Invalid mobile number / Invalid OTP / reqId is required' }
         '401': { description: 'Invalid or expired OTP, or mobile does not match the OTP session' }
-        '429': { : '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
         '502': { description: Unable to verify OTP with MSG91 }
         '503': { description: Mobile OTP login is not configured on the server }
 
@@ -302,7 +302,7 @@ paths:
                       role: { type: string, example: user }
                       loginMethod: { type: string, example: mobile_otp }
                   expiresAt: { type: string, format: date-time }
-        '401': { : '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
 
   /api/v1/users/me:
     get:
@@ -459,7 +459,7 @@ paths:
                 razorpay_payment_id: { type: string }
                 razorpay_signature: { type: string }
       responses:
-        '200': { description: Payment SUCCESS, subscription ACTIVE }
+        '200': { description: 'Payment SUCCESS, subscription ACTIVE' }
         '400': { $ref: '#/components/responses/Error' }
         '402': { $ref: '#/components/responses/Error' }
         '404': { $ref: '#/components/responses/Error' }
