@@ -70,6 +70,15 @@ const schema = z.object({
   JWT_EXPIRES_IN: str('7d'),
   JWT_ISSUER: str('bhoomiscan-api'),
 
+  // Google login (Firebase Auth) for POST /api/auth/google. Credentials stay server-side.
+  FIREBASE_PROJECT_ID: str(''),
+  // Service account key JSON (raw or base64). Optional: GOOGLE_APPLICATION_CREDENTIALS /
+  // Application Default Credentials are used when this is empty.
+  FIREBASE_SERVICE_ACCOUNT_JSON: str(''),
+  // Also reject revoked ID tokens / disabled Firebase users (needs credentials).
+  // Defaults to on whenever credentials are available.
+  FIREBASE_CHECK_REVOKED: str(''),
+
   MOBILE_DEFAULT_COUNTRY_CODE: str('91'),
   MSG91_WIDGET_ID: str(''),
   MSG91_TOKEN_AUTH: str(''),
@@ -117,6 +126,7 @@ const schema = z.object({
   RATE_LIMIT_WINDOW_SECONDS: int(60, { min: 1 }),
   RATE_LIMIT_GLOBAL_MAX: int(300, { min: 1 }),
   RATE_LIMIT_OTP_VERIFY_MAX: int(10, { min: 1 }),
+  RATE_LIMIT_GOOGLE_LOGIN_MAX: int(20, { min: 1 }),
   RATE_LIMIT_LAND_VERIFY_MAX: int(20, { min: 1 }),
 });
 
@@ -137,6 +147,28 @@ if (env.NODE_ENV === 'production') {
     throw new Error('DATABASE_URL is required in production');
   }
 }
+
+const firebase = (() => {
+  let serviceAccount = null;
+  if (env.FIREBASE_SERVICE_ACCOUNT_JSON) {
+    const raw = env.FIREBASE_SERVICE_ACCOUNT_JSON;
+    try {
+      serviceAccount = JSON.parse(raw.startsWith('{') ? raw : Buffer.from(raw, 'base64').toString('utf8'));
+    } catch {
+      // Never echo the value: it holds a private key.
+      throw new Error('FIREBASE_SERVICE_ACCOUNT_JSON is not valid JSON (raw or base64)');
+    }
+    if (env.FIREBASE_PROJECT_ID && serviceAccount.project_id && serviceAccount.project_id !== env.FIREBASE_PROJECT_ID) {
+      throw new Error('FIREBASE_SERVICE_ACCOUNT_JSON belongs to a different project than FIREBASE_PROJECT_ID');
+    }
+  }
+  const hasCredentials = Boolean(serviceAccount || process.env.GOOGLE_APPLICATION_CREDENTIALS);
+  const checkRevoked = env.FIREBASE_CHECK_REVOKED === '' ? hasCredentials : ['1', 'true', 'yes', 'on'].includes(env.FIREBASE_CHECK_REVOKED.toLowerCase());
+  if (checkRevoked && !hasCredentials) {
+    throw new Error('FIREBASE_CHECK_REVOKED=true needs FIREBASE_SERVICE_ACCOUNT_JSON or GOOGLE_APPLICATION_CREDENTIALS');
+  }
+  return { projectId: env.FIREBASE_PROJECT_ID, serviceAccount, checkRevoked };
+})();
 
 const trustProxy = (() => {
   const value = env.TRUST_PROXY.toLowerCase();
@@ -169,6 +201,8 @@ const config = {
     isConfigured: env.JWT_SECRET.length >= MIN_JWT_SECRET_LENGTH,
     minSecretLength: MIN_JWT_SECRET_LENGTH,
   },
+
+  firebase,
 
   otp: {
     defaultCountryCode: env.MOBILE_DEFAULT_COUNTRY_CODE.replace(/\D/g, '') || '91',
@@ -233,6 +267,7 @@ const config = {
     windowMs: env.RATE_LIMIT_WINDOW_SECONDS * 1000,
     globalMax: env.RATE_LIMIT_GLOBAL_MAX,
     otpVerifyMax: env.RATE_LIMIT_OTP_VERIFY_MAX,
+    googleLoginMax: env.RATE_LIMIT_GOOGLE_LOGIN_MAX,
     landVerifyMax: env.RATE_LIMIT_LAND_VERIFY_MAX,
   },
 };

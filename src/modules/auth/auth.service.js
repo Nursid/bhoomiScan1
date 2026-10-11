@@ -1,8 +1,10 @@
 /**
  * Mobile OTP login via the MSG91 OTP Widget (same API as the reference backend's
- * server/mobileVerify.js).
+ * server/mobileVerify.js), and Google login via Firebase Auth.
  *
  *   POST /api/auth/mobile-verify   { mobile, otp, reqId }
+ *   POST /api/auth/google          { idToken }   Firebase ID token from signInWithPopup()
+ *   POST /api/auth/google/link     { idToken }   Bearer token; links Google to the logged-in account
  *   GET  /api/auth/me              Bearer token -> identity
  *
  * The UI calls the MSG91 widget's sendOtp() and receives a reqId. This backend
@@ -13,6 +15,11 @@
  *
  * Difference from the reference: this service has a users table, so `user.id`
  * is the database user id (uuid) instead of the E.164 mobile number.
+ *
+ * Google login issues the same login JWT. The Firebase ID token is verified by
+ * Firebase Admin; the user is found by the verified Firebase UID only. An
+ * account is never merged by email: if another account already uses the Google
+ * email, the user must log in with OTP and link Google (POST /google/link).
  */
 
 const { prisma } = require('../../database/prisma');
@@ -22,9 +29,12 @@ const { maskMobile } = require('../../utils/sanitize');
 const { normalizeMobile } = require('../../utils/mobile');
 const { AppError } = require('../../utils/errors');
 const msg91 = require('../../integrations/msg91/msg91.client');
+const firebase = require('../../integrations/firebase/firebase-admin.client');
 const tokens = require('./token.service');
 
 const LOGIN_METHOD = 'mobile_otp';
+const GOOGLE_LOGIN_METHOD = 'google';
+const GOOGLE_PROVIDER = 'google.com';
 
 const authError = (statusCode, code, message) => new AppError(statusCode, code, message);
 
@@ -113,6 +123,127 @@ const mobileVerify = async (body) => {
   return issueApplicationLogin(mobile);
 };
 
+/* ------------------------------- Google login ----------------------------- */
+
+const readIdToken = (body) => {
+  const idToken = typeof body?.idToken === 'string' ? body.idToken.trim() : '';
+  // A Firebase ID token is a compact JWS (three base64url parts), ~1 KB.
+  if (!/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(idToken) || idToken.length > 8192) {
+    throw authError(400, 'ID_TOKEN_REQUIRED', 'idToken is required');
+  }
+  return idToken;
+};
+
+/** Verifies the Firebase ID token and requires a verified Google identity. */
+const verifyGoogleIdentity = async (idToken) => {
+  let identity;
+  try {
+    identity = await firebase.verifyIdToken(idToken);
+  } catch (error) {
+    if (error instanceof firebase.FirebaseAuthError) {
+      throw authError(error.statusCode, error.code, error.message);
+    }
+    throw error;
+  }
+  if (identity.provider !== GOOGLE_PROVIDER) {
+    throw authError(401, 'UNSUPPORTED_SIGN_IN_PROVIDER', 'Please sign in with Google');
+  }
+  if (!identity.email || !identity.emailVerified) {
+    throw authError(403, 'EMAIL_NOT_VERIFIED', 'Your Google account email is not verified');
+  }
+  return identity;
+};
+
+const ensureGoogleConfigured = () => {
+  if (!firebase.isConfigured()) {
+    throw authError(503, 'GOOGLE_LOGIN_NOT_CONFIGURED', 'Google login is not configured on the server (FIREBASE_PROJECT_ID).');
+  }
+  if (!config.jwt.isConfigured) {
+    throw authError(503, 'AUTH_NOT_CONFIGURED', 'Login tokens are not configured on the server (JWT_SECRET).');
+  }
+};
+
+const googleUserResponse = (user) => ({
+  id: user.id,
+  mobile: user.mobile || null,
+  email: user.email || null,
+  name: user.name || null,
+  loginMethod: GOOGLE_LOGIN_METHOD,
+  lastLoginAt: user.lastLoginAt ? user.lastLoginAt.toISOString() : null,
+});
+
+const googleLogin = async (body) => {
+  ensureGoogleConfigured();
+  const identity = await verifyGoogleIdentity(readIdToken(body));
+  const now = new Date();
+
+  const existing = await prisma.user.findUnique({ where: { firebaseUid: identity.uid } });
+  if (existing && existing.status !== 'ACTIVE') {
+    throw authError(403, 'ACCOUNT_BLOCKED', 'This account is blocked');
+  }
+
+  if (!existing) {
+    // Same email on another account (e.g. an OTP user who added it): do not merge on email alone.
+    const emailOwner = await prisma.user.findFirst({
+      where: {
+        email: { equals: identity.email, mode: 'insensitive' },
+        OR: [{ firebaseUid: null }, { firebaseUid: { not: identity.uid } }],
+      },
+      select: { id: true },
+    });
+    if (emailOwner) {
+      logger.warn({ userId: emailOwner.id }, '[GOOGLE LOGIN] Email belongs to an account not linked to this Google identity');
+      throw authError(
+        409,
+        'ACCOUNT_LINK_REQUIRED',
+        'An account with this email already exists. Log in with your mobile number and link Google from your account.',
+      );
+    }
+  }
+
+  // upsert on the unique Firebase UID: concurrent first logins cannot create two users.
+  // Role and status always come from our defaults / existing record, never from Google.
+  const user = await prisma.user.upsert({
+    where: { firebaseUid: identity.uid },
+    create: { firebaseUid: identity.uid, email: identity.email, name: identity.name, lastLoginAt: now },
+    update: { lastLoginAt: now },
+  });
+  if (user.status !== 'ACTIVE') {
+    throw authError(403, 'ACCOUNT_BLOCKED', 'This account is blocked');
+  }
+
+  const { token } = tokens.generateToken({ ...user, loginMethod: GOOGLE_LOGIN_METHOD });
+  logger.info({ userId: user.id, isNewUser: !existing }, 'user logged in with Google');
+  return { success: true, token, user: googleUserResponse(user) };
+};
+
+/** Links a verified Google identity to the logged-in account (proof of both identities). */
+const linkGoogle = async (currentUser, body) => {
+  ensureGoogleConfigured();
+  const identity = await verifyGoogleIdentity(readIdToken(body));
+
+  const owner = await prisma.user.findUnique({ where: { firebaseUid: identity.uid }, select: { id: true } });
+  if (owner && owner.id !== currentUser.id) {
+    throw authError(409, 'GOOGLE_ACCOUNT_IN_USE', 'This Google account is already linked to another account');
+  }
+  const record = await prisma.user.findUniqueOrThrow({ where: { id: currentUser.id } });
+  if (record.firebaseUid && record.firebaseUid !== identity.uid) {
+    throw authError(409, 'GOOGLE_ALREADY_LINKED', 'A different Google account is already linked to this account');
+  }
+
+  const user = owner
+    ? record
+    : await prisma.user.update({
+        where: { id: record.id },
+        data: { firebaseUid: identity.uid, email: record.email || identity.email, name: record.name || identity.name },
+      });
+  logger.info({ userId: user.id }, 'Google account linked');
+  return {
+    success: true,
+    user: { id: user.id, mobile: user.mobile || null, email: user.email || null, name: user.name || null, googleLinked: true },
+  };
+};
+
 /** Identity behind a login token (req.user / req.auth set by authenticate). */
 const me = async (user, claims) => {
   const record = await prisma.user.findUniqueOrThrow({ where: { id: user.id } });
@@ -139,4 +270,4 @@ const publicUser = (user) => ({
   lastLoginAt: user.lastLoginAt,
 });
 
-module.exports = { mobileVerify, me, publicUser, issueApplicationLogin, __testing: { readRequest } };
+module.exports = { mobileVerify, googleLogin, linkGoogle, me, publicUser, issueApplicationLogin, __testing: { readRequest, readIdToken } };

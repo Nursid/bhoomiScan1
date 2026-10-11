@@ -15,4 +15,7 @@ Object.assign(process.env, {
   MSG91_WIDGET_ID: 'widget-unit',
   MSG91_TOKEN_AUTH: 'token-auth-unit',
   MSG91_BASE_URL: 'https://msg91.test',
+  FIREBASE_PROJECT_ID: 'bhoomiscan-test',
+  FIREBASE_SERVICE_ACCOUNT_JSON: '',
+  FIREBASE_CHECK_REVOKED: '',
 });

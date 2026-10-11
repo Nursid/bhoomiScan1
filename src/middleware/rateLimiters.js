@@ -48,10 +48,16 @@ const otpVerifyLimiters = [
   base({ limit: config.rateLimit.otpVerifyMax * 4, keyGenerator: (req) => `otp-verify-ip:${ipKey(req)}` }),
 ];
 
+// Google login has no stable identifier before the token is verified, so it is keyed by IP.
+const googleLoginLimiter = base({
+  limit: config.rateLimit.googleLoginMax,
+  keyGenerator: (req) => `google-login-ip:${ipKey(req)}`,
+});
+
 // Keyed by user (runs after authenticate).
 const landVerifyLimiter = base({
   limit: config.rateLimit.landVerifyMax,
   keyGenerator: (req) => `land-verify:${req.user?.id || ipKey(req)}`,
 });
 
-module.exports = { globalLimiter, otpVerifyLimiters, landVerifyLimiter };
+module.exports = { globalLimiter, otpVerifyLimiters, googleLoginLimiter, landVerifyLimiter };

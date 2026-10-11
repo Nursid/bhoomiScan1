@@ -114,6 +114,30 @@ const createApp = () => {
     );
   }
 
+  // Login page (Google sign-in). Served from the API's own origin so the login token it
+  // stores in sessionStorage is visible to /land and /payment. The Firebase JS SDK needs
+  // gstatic (SDK), apis.google.com + the project's authDomain (popup helper iframe) and
+  // the Identity Toolkit / Secure Token APIs; signInWithPopup needs a COOP that allows popups.
+  const loginPage = path.join(__dirname, '..', 'login.html');
+  if (fs.existsSync(loginPage)) {
+    const authDomain = config.firebase.projectId ? [`https://${config.firebase.projectId}.firebaseapp.com`] : [];
+    app.get(
+      ['/login', '/login.html'],
+      helmet.contentSecurityPolicy({
+        directives: {
+          defaultSrc: ["'self'"],
+          scriptSrc: ["'self'", "'unsafe-inline'", 'https://www.gstatic.com', 'https://apis.google.com'],
+          styleSrc: ["'self'", "'unsafe-inline'"],
+          connectSrc: ["'self'", 'https://identitytoolkit.googleapis.com', 'https://securetoken.googleapis.com', 'https://www.googleapis.com'],
+          frameSrc: [...authDomain, 'https://accounts.google.com'],
+          imgSrc: ["'self'", 'data:', 'https://*.googleusercontent.com'],
+        },
+      }),
+      helmet.crossOriginOpenerPolicy({ policy: 'same-origin-allow-popups' }),
+      (req, res) => res.sendFile(loginPage),
+    );
+  }
+
   if (config.apiDocsEnabled) {
     const specPath = path.join(__dirname, '..', 'docs', 'openapi.yaml');
     if (fs.existsSync(specPath)) {
@@ -126,7 +150,7 @@ const createApp = () => {
     }
   }
 
-  // Same paths as the reference backend: /api/auth/mobile-verify, /api/auth/me
+  // Same paths as the reference backend: /api/auth/mobile-verify, /api/auth/me (+ /api/auth/google)
   app.use('/api/auth', globalLimiter, authRoutes);
   app.use('/api/v1', globalLimiter, v1);
 

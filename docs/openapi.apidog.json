@@ -681,6 +681,185 @@
         "x-apidog-folder": "Auth"
       }
     },
+    "/api/auth/google": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "security": [],
+        "summary": "Exchange a Firebase ID token (Google sign-in) for a login token",
+        "description": "The web app signs in with Google through the Firebase JS SDK (signInWithPopup) and sends\n`await user.getIdToken()`. The backend verifies it with Firebase Admin (project\nFIREBASE_PROJECT_ID; revocation too when credentials are configured), requires\nsign_in_provider `google.com` and a verified email, finds the user by Firebase UID or\nregisters a new USER account, and issues the same JWT as mobile-verify.\nAccounts are never merged by email: if another account already has the email, the\nresponse is 409 ACCOUNT_LINK_REQUIRED (log in with OTP, then POST /api/auth/google/link).\n",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "idToken"
+                ],
+                "properties": {
+                  "idToken": {
+                    "type": "string",
+                    "description": "Firebase ID token"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Logged in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "token": {
+                      "type": "string"
+                    },
+                    "user": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "mobile": {
+                          "type": "string",
+                          "nullable": true,
+                          "example": null
+                        },
+                        "email": {
+                          "type": "string",
+                          "example": "asha@example.com"
+                        },
+                        "name": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "loginMethod": {
+                          "type": "string",
+                          "example": "google"
+                        },
+                        "lastLoginAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "ID_TOKEN_REQUIRED: idToken missing or malformed"
+          },
+          "401": {
+            "description": "INVALID_ID_TOKEN / ID_TOKEN_EXPIRED / ID_TOKEN_REVOKED / UNSUPPORTED_SIGN_IN_PROVIDER"
+          },
+          "403": {
+            "description": "ACCOUNT_BLOCKED / FIREBASE_USER_DISABLED / EMAIL_NOT_VERIFIED"
+          },
+          "409": {
+            "description": "ACCOUNT_LINK_REQUIRED: the email belongs to another account"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "description": "GOOGLE_LOGIN_NOT_CONFIGURED / GOOGLE_AUTH_UNAVAILABLE"
+          }
+        },
+        "x-apidog-folder": "Auth"
+      }
+    },
+    "/api/auth/google/link": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Link a Google account to the logged-in account",
+        "description": "Requires both a BhoomiScan login token (Authorization header) and a Firebase ID token for\nthe Google account. Afterwards POST /api/auth/google logs into this same account.\n",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "idToken"
+                ],
+                "properties": {
+                  "idToken": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Linked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "user": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "mobile": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "email": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "name": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "googleLinked": {
+                          "type": "boolean",
+                          "example": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "ID_TOKEN_REQUIRED"
+          },
+          "401": {
+            "description": "Missing/invalid login token or invalid Firebase ID token"
+          },
+          "409": {
+            "description": "GOOGLE_ACCOUNT_IN_USE / GOOGLE_ALREADY_LINKED"
+          }
+        },
+        "x-apidog-folder": "Auth"
+      }
+    },
     "/api/auth/me": {
       "get": {
         "tags": [

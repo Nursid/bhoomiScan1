@@ -122,7 +122,10 @@ enum AlertStatus {
 
 model User {
   id          String     @id @default(uuid()) @db.Uuid
-  mobile      String     @unique // E.164, e.g. +917081002501
+  // E.164, e.g. +917081002501. Null for accounts created through Google login.
+  mobile      String?    @unique
+  // Firebase Auth UID, set only from a server-verified Firebase ID token (Google login).
+  firebaseUid String?    @unique @map("firebase_uid")
   name        String?
   email       String?
   role        UserRole   @default(USER)

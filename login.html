@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!--
+    BhoomiScan API origin. Leave empty when this page is served by the API itself
+    (GET /login), which is the normal setup: the login token then lands in the same
+    origin's sessionStorage that /land and /payment read.
+    Only set it when opening this file from another origin (e.g. Live Server), and add
+    that origin to the API's CORS_ORIGINS.
+  -->
+  <meta name="bhoomiscan-api-base" content="http://localhost:4001" />
+  <title>BhoomiScan - Google Login</title>
+
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f4f6f9;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      margin: 0;
+    }
+
+    .login-card {
+      background: white;
+      padding: 32px;
+      border-radius: 14px;
+      box-shadow: 0 4px 20px #00000012;
+      width: 340px;
+      max-width: calc(100vw - 32px);
+      box-sizing: border-box;
+      text-align: center;
+    }
+
+    h2 { margin-bottom: 10px; }
+
+    p { color: #666; }
+
+    button {
+      width: 100%;
+      padding: 13px;
+      border-radius: 8px;
+      border: 1px solid #ddd;
+      background: white;
+      cursor: pointer;
+      font-size: 15px;
+      margin-top: 15px;
+    }
+
+    button:hover { background: #f7f7f7; }
+
+    button:disabled { opacity: .6; cursor: default; }
+
+    #status {
+      margin-top: 18px;
+      overflow-wrap: anywhere;
+      font-size: 14px;
+    }
+
+    #status.error { color: #b42318; }
+    #status.ok { color: #067647; }
+  </style>
+</head>
+
+<body>
+  <div class="login-card">
+    <h2>Welcome to BhoomiScan</h2>
+    <p>Sign in to continue</p>
+
+    <button id="googleLogin">
+      🌐 Continue with Google
+    </button>
+
+    <button id="logout" hidden>
+      Sign out
+    </button>
+
+    <div id="status" role="status" aria-live="polite">Not logged in</div>
+  </div>
+
+  <script type="module">
+    import { initializeApp }
+      from "https://www.gstatic.com/firebasejs/13.0.0/firebase-app.js";
+
+    import {
+      getAuth,
+      GoogleAuthProvider,
+      signInWithPopup,
+      signOut
+    } from "https://www.gstatic.com/firebasejs/13.0.0/firebase-auth.js";
+
+    // Public web config (not a secret). Firebase is initialised once, here.
+    const firebaseConfig = {
+      apiKey: "AIzaSyCJDedYjr1ievhPKMx6sTUBmiwbCYQqUKk",
+      authDomain: "bhoomiscan-a8d49.firebaseapp.com",
+      projectId: "bhoomiscan-a8d49",
+      storageBucket: "bhoomiscan-a8d49.firebasestorage.app",
+      messagingSenderId: "224373855498",
+      appId: "1:224373855498:web:a89088b89eca710ec0d6f3",
+      measurementId: "G-Q930M83TRW"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: "select_account" });
+
+    const API_BASE = (document.querySelector('meta[name="bhoomiscan-api-base"]')?.content || "").trim().replace(/\/+$/, "");
+    // Same key /land and /payment read the login token from.
+    const TOKEN_KEY = "bhoomiscanToken";
+    // Same origin as this page, so the dashboard can read the token from sessionStorage.
+    const DASHBOARD_URL = "land.html";
+    const REQUEST_TIMEOUT_MS = 20000;
+
+    const googleButton = document.getElementById("googleLogin");
+    const logoutButton = document.getElementById("logout");
+    const status = document.getElementById("status");
+
+    const setStatus = (text, kind = "") => {
+      status.textContent = text;
+      status.className = kind;
+    };
+
+    const readToken = () => {
+      try { return sessionStorage.getItem(TOKEN_KEY) || ""; } catch { return ""; }
+    };
+
+    const showSignedIn = (signedIn) => {
+      googleButton.hidden = signedIn;
+      logoutButton.hidden = !signedIn;
+    };
+
+    const FIREBASE_MESSAGES = {
+      "auth/popup-closed-by-user": "Sign-in was cancelled.",
+      "auth/cancelled-popup-request": "Sign-in was cancelled.",
+      "auth/popup-blocked": "The sign-in popup was blocked. Allow popups for this site and try again.",
+      "auth/network-request-failed": "Network error. Check your connection and try again.",
+      "auth/unauthorized-domain": "Google sign-in is not enabled for this site's domain.",
+      "auth/user-disabled": "This Google account is disabled.",
+    };
+
+    class LoginError extends Error {}
+
+    /** POSTs the Firebase ID token; resolves { status, body } (body = parsed JSON or {}). */
+    const exchangeIdToken = async (idToken) => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+      try {
+        const res = await fetch(`${API_BASE}/api/auth/google`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ idToken }),
+          signal: controller.signal,
+        });
+        const body = await res.json().catch(() => ({}));
+        return { status: res.status, body };
+      } catch (error) {
+        throw new LoginError(
+          error.name === "AbortError"
+            ? "The server took too long to respond. Please try again."
+            : "Could not reach BhoomiScan. Check your connection and try again."
+        );
+      } finally {
+        clearTimeout(timer);
+      }
+    };
+
+    const messageFor = ({ status: httpStatus, body }) => {
+      const message = body?.message || body?.error?.message;
+      if (httpStatus === 429) return "Too many attempts. Please wait a minute and try again.";
+      if (httpStatus >= 500 && !message) return "BhoomiScan is unavailable right now. Please try again later.";
+      return message || `Login failed (HTTP ${httpStatus}).`;
+    };
+
+    let busy = false;
+
+    googleButton.addEventListener("click", async () => {
+      if (busy) return; // duplicate clicks
+      busy = true;
+      googleButton.disabled = true;
+      setStatus("Signing in...");
+      let redirecting = false;
+
+      try {
+        const { user } = await signInWithPopup(auth, provider);
+        setStatus("Verifying your account...");
+
+        // The popup alone proves nothing to the backend: the API verifies the ID token
+        // and decides whether this person may use BhoomiScan.
+        let result = await exchangeIdToken(await user.getIdToken());
+        if (result.status === 401 && result.body?.error?.code === "ID_TOKEN_EXPIRED") {
+          result = await exchangeIdToken(await user.getIdToken(true));
+        }
+        if (result.status !== 200 || result.body?.success !== true || !result.body?.token) {
+          throw new LoginError(messageFor(result));
+        }
+
+        try {
+          sessionStorage.setItem(TOKEN_KEY, result.body.token);
+        } catch {
+          throw new LoginError("Your browser blocked session storage, so the login could not be saved.");
+        }
+        setStatus(`Welcome, ${result.body.user?.name || result.body.user?.email || "back"}. Redirecting...`, "ok");
+        redirecting = true;
+        window.location.replace(DASHBOARD_URL);
+      } catch (error) {
+        const message = error instanceof LoginError
+          ? error.message
+          : FIREBASE_MESSAGES[error?.code] || "Google sign-in failed. Please try again.";
+        if (!(error instanceof LoginError)) console.error("Google login error:", error?.code || error?.name);
+        setStatus(message, "error");
+      } finally {
+        // The BhoomiScan login token is the session; the Firebase session is not kept.
+        await signOut(auth).catch(() => {});
+        if (!redirecting) {
+          busy = false;
+          googleButton.disabled = false;
+        }
+      }
+    });
+
+    logoutButton.addEventListener("click", async () => {
+      try { sessionStorage.removeItem(TOKEN_KEY); } catch {}
+      await signOut(auth).catch(() => {});
+      showSignedIn(false);
+      setStatus("Signed out successfully");
+    });
+
+    if (readToken()) {
+      showSignedIn(true);
+      setStatus("You are already signed in.");
+    }
+  </script>
+</body>
+</html>

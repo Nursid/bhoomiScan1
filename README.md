@@ -41,9 +41,15 @@ curl -X POST localhost:4000/api/auth/mobile-verify -H 'content-type: application
 curl localhost:4000/api/auth/me -H "Authorization: Bearer <token>"
 ```
 
+### Google login (Firebase)
+
+Open `http://127.0.0.1:4000/login` (served by the API, so the token is stored in the same origin as `/land` and `/payment`). The page signs in with Google through Firebase, sends the Firebase ID token to `POST /api/auth/google {idToken}`, and gets the same `{ success, token, user }` response as mobile-verify. The backend verifies the ID token with Firebase Admin (`FIREBASE_PROJECT_ID`, optional `FIREBASE_SERVICE_ACCOUNT_JSON` or `GOOGLE_APPLICATION_CREDENTIALS` for revocation checks) and finds the user by Firebase UID or registers a new `USER`.
+
+Accounts are never merged by email. If another account already has the Google email, login returns `409 ACCOUNT_LINK_REQUIRED`; the user logs in with OTP and calls `POST /api/auth/google/link {idToken}` with their Bearer token. Every host that serves `/login` must be listed under Firebase console > Authentication > Settings > Authorized domains.
+
 ### Full flow
 
-1. Log in: `POST /api/auth/mobile-verify {mobile, otp, reqId}` returns a `token`.
+1. Log in: `POST /api/auth/mobile-verify {mobile, otp, reqId}` (or `POST /api/auth/google {idToken}`) returns a `token`.
 2. Pick a plan: `GET /plans`.
 3. Create a subscription: `POST /subscriptions/create {planCode}`.
 4. Create a payment: `POST /payments/create {subscriptionId}` returns the details for Razorpay Checkout.
