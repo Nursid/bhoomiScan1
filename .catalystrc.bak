@@ -1,0 +1,36 @@
+{
+  "defaults": {
+    "project": 1,
+    "env": 1
+  },
+  "actives": {
+    "project": 1,
+    "env": 1
+  },
+  "projects": [
+    {
+      "idx": 1,
+      "id": "52236000000013051",
+      "name": "BhoomiScan",
+      "domain": {
+        "id": "50046525593",
+        "name": "bhoomiscan-60090479026.development"
+      },
+      "timezone": "Asia/Kolkata",
+      "env": [
+        {
+          "idx": 1,
+          "id": "60090479026",
+          "name": "Development",
+          "type": 3
+        },
+        {
+          "idx": 2,
+          "id": "50046531043",
+          "name": "Production",
+          "type": 1
+        }
+      ]
+    }
+  ]
+}
