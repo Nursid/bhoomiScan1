@@ -1,5 +1,7 @@
 # BhoomiScan API: curl flow
 
+> **Outdated.** See [API_FLOW.md](API_FLOW.md) for the current flow (yearly plans, Google login, renewal, push notifications, comparison).
+
 Every response is wrapped in `{ "success": true, "data": ... }`. Errors come back as `{ "success": false, "error": { "code", "message" } }`.
 
 ---

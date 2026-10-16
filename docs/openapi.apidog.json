@@ -918,6 +918,123 @@
         "x-apidog-folder": "Auth"
       }
     },
+    "/api/v1/users/me/profile": {
+      "put": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "Complete / update the profile after login",
+        "description": "Login responses and GET /users/me return profile { complete, missing }.\nMobile sign-up requires name (email optional). Google sign-up requires name and a mobile\nnumber verified with the MSG91 widget OTP (mobile + otp + reqId).\n",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 100,
+                    "example": "Ram Kumar"
+                  },
+                  "email": {
+                    "type": "string",
+                    "nullable": true,
+                    "description": "optional; \"\" or null removes it"
+                  },
+                  "mobile": {
+                    "type": "string",
+                    "example": "917081002501",
+                    "description": "only for accounts without a mobile"
+                  },
+                  "otp": {
+                    "type": "string",
+                    "example": "302348"
+                  },
+                  "reqId": {
+                    "type": "string",
+                    "example": "36697a704157303534313839"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "user": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string"
+                            },
+                            "mobile": {
+                              "type": "string",
+                              "nullable": true
+                            },
+                            "email": {
+                              "type": "string",
+                              "nullable": true
+                            }
+                          }
+                        },
+                        "profile": {
+                          "type": "object",
+                          "properties": {
+                            "complete": {
+                              "type": "boolean"
+                            },
+                            "missing": {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "enum": [
+                                  "name",
+                                  "mobile"
+                                ]
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "INVALID_MOBILE / INVALID_OTP_FORMAT / REQ_ID_REQUIRED"
+          },
+          "401": {
+            "description": "INVALID_OTP / OTP_MOBILE_MISMATCH"
+          },
+          "409": {
+            "description": "MOBILE_IN_USE / MOBILE_ALREADY_SET"
+          },
+          "422": {
+            "description": "VALIDATION_FAILED (missing or invalid name / email / mobile)"
+          }
+        },
+        "x-apidog-folder": "Users"
+      }
+    },
     "/api/v1/users/me": {
       "get": {
         "tags": [

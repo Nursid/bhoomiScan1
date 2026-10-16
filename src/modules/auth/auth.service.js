@@ -59,6 +59,20 @@ const readRequest = (body) => {
   return { mobile, otp, reqId };
 };
 
+/* ------------------------------ Profile status ---------------------------- */
+
+/**
+ * What the app still has to ask the user for. Name is always required; a mobile
+ * number is required when the account has none (signed up with Google). Email is
+ * never required.
+ */
+const profileStatus = (user) => {
+  const missing = [];
+  if (!user.name || !String(user.name).trim()) missing.push('name');
+  if (!user.mobile) missing.push('mobile');
+  return { complete: missing.length === 0, missing };
+};
+
 /* --------------------------- Application login step ----------------------- */
 
 const issueApplicationLogin = async (mobile) => {
@@ -85,21 +99,14 @@ const issueApplicationLogin = async (mobile) => {
       loginMethod: LOGIN_METHOD,
       lastLoginAt: now.toISOString(),
     },
+    profile: profileStatus(user),
   };
 };
 
 /* --------------------------------- Handlers ------------------------------- */
 
-const mobileVerify = async (body) => {
-  if (!msg91.isConfigured()) {
-    throw authError(503, 'OTP_NOT_CONFIGURED', 'Mobile OTP login is not configured on the server (MSG91).');
-  }
-  if (!config.jwt.isConfigured) {
-    throw authError(503, 'AUTH_NOT_CONFIGURED', 'Login tokens are not configured on the server (JWT_SECRET).');
-  }
-
-  const { mobile, otp, reqId } = readRequest(body);
-
+/** Asks MSG91 whether `otp` is right for widget request `reqId`, sent to `mobile`. Throws AppError if not. */
+const verifyMobileOtp = async ({ mobile, otp, reqId }) => {
   let result;
   try {
     result = await msg91.verifyWidgetOtp({ reqId, otp });
@@ -120,7 +127,19 @@ const mobileVerify = async (body) => {
   }
 
   logger.info({ mobile: maskMobile(mobile.digits), reqId }, '[MOBILE VERIFY] OTP verified by MSG91');
-  return issueApplicationLogin(mobile);
+};
+
+const mobileVerify = async (body) => {
+  if (!msg91.isConfigured()) {
+    throw authError(503, 'OTP_NOT_CONFIGURED', 'Mobile OTP login is not configured on the server (MSG91).');
+  }
+  if (!config.jwt.isConfigured) {
+    throw authError(503, 'AUTH_NOT_CONFIGURED', 'Login tokens are not configured on the server (JWT_SECRET).');
+  }
+
+  const request = readRequest(body);
+  await verifyMobileOtp(request);
+  return issueApplicationLogin(request.mobile);
 };
 
 /* ------------------------------- Google login ----------------------------- */
@@ -214,7 +233,7 @@ const googleLogin = async (body) => {
 
   const { token } = tokens.generateToken({ ...user, loginMethod: GOOGLE_LOGIN_METHOD });
   logger.info({ userId: user.id, isNewUser: !existing }, 'user logged in with Google');
-  return { success: true, token, user: googleUserResponse(user) };
+  return { success: true, token, user: googleUserResponse(user), profile: profileStatus(user) };
 };
 
 /** Links a verified Google identity to the logged-in account (proof of both identities). */
@@ -244,6 +263,68 @@ const linkGoogle = async (currentUser, body) => {
   };
 };
 
+/* ----------------------------- Complete profile --------------------------- */
+
+const isUniqueViolation = (error) => error?.code === 'P2002';
+
+/**
+ * PUT /users/me/profile. `input` is already shape-validated by the route.
+ * A mobile number is only accepted with an OTP proving it (MSG91 widget reqId),
+ * because mobile OTP login finds accounts by that number.
+ */
+const completeProfile = async (userId, input) => {
+  const record = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
+
+  const missing = [];
+  if (!input.name && !record.name) missing.push({ location: 'body', field: 'name', message: 'Name is required' });
+  if (!input.mobile && !record.mobile) missing.push({ location: 'body', field: 'mobile', message: 'Mobile number is required (verify it with an OTP)' });
+  if (missing.length > 0) {
+    throw new AppError(422, 'VALIDATION_FAILED', 'Request validation failed', { details: missing });
+  }
+
+  const data = {};
+  if (input.name) data.name = input.name;
+  if (input.email !== undefined) data.email = input.email; // null clears it
+
+  if (input.mobile !== undefined) {
+    const requested = normalizeMobile(input.mobile);
+    if (record.mobile) {
+      if (requested?.e164 !== record.mobile) {
+        throw authError(409, 'MOBILE_ALREADY_SET', 'Your account already has a mobile number');
+      }
+    } else {
+      if (!msg91.isConfigured()) {
+        throw authError(503, 'OTP_NOT_CONFIGURED', 'Mobile OTP verification is not configured on the server (MSG91).');
+      }
+      const request = readRequest(input);
+      // OTP first, so this endpoint never reveals whether a number is registered.
+      await verifyMobileOtp(request);
+      const owner = await prisma.user.findUnique({ where: { mobile: request.mobile.e164 }, select: { id: true } });
+      if (owner) {
+        throw authError(409, 'MOBILE_IN_USE', 'This mobile number already has a BhoomiScan account. Log in with it, then link Google.');
+      }
+      data.mobile = request.mobile.e164;
+    }
+  }
+
+  let user = record;
+  if (Object.keys(data).length > 0) {
+    try {
+      user = await prisma.user.update({ where: { id: userId }, data });
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        throw authError(409, 'MOBILE_IN_USE', 'This mobile number already has a BhoomiScan account. Log in with it, then link Google.');
+      }
+      throw error;
+    }
+  }
+  logger.info({ userId, fields: Object.keys(data) }, 'profile updated');
+  return {
+    user: { id: user.id, name: user.name || null, mobile: user.mobile || null, email: user.email || null },
+    profile: profileStatus(user),
+  };
+};
+
 /** Identity behind a login token (req.user / req.auth set by authenticate). */
 const me = async (user, claims) => {
   const record = await prisma.user.findUniqueOrThrow({ where: { id: user.id } });
@@ -270,4 +351,4 @@ const publicUser = (user) => ({
   lastLoginAt: user.lastLoginAt,
 });
 
-module.exports = { mobileVerify, googleLogin, linkGoogle, me, publicUser, issueApplicationLogin, __testing: { readRequest, readIdToken } };
+module.exports = { mobileVerify, googleLogin, linkGoogle, completeProfile, profileStatus, me, publicUser, issueApplicationLogin, __testing: { readRequest, readIdToken } };

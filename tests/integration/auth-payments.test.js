@@ -51,6 +51,7 @@ describe('auth', () => {
       success: true,
       token: expect.any(String),
       user: { id: expect.any(String), mobile: '+919876543210', loginMethod: 'mobile_otp', lastLoginAt: expect.any(String) },
+      profile: { complete: false, missing: ['name'] },
     });
 
     const call = fake.callsTo(/msg91\.test\/api\/v5\/widget\/verifyOtp$/).pop();

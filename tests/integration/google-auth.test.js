@@ -69,6 +69,7 @@ describe('POST /api/auth/google', () => {
         loginMethod: 'google',
         lastLoginAt: expect.any(String),
       },
+      profile: { complete: false, missing: ['mobile'] },
     });
     expect(firebase.verifyIdToken).toHaveBeenCalledWith(idToken('asha'));
 

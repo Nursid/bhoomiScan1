@@ -1,0 +1,149 @@
+// Profile completion after login: Google sign-ups need name + OTP-verified mobile,
+// mobile sign-ups need a name; email is always optional.
+jest.mock('../../src/integrations/firebase/firebase-admin.client', () => {
+  const actual = jest.requireActual('../../src/integrations/firebase/firebase-admin.client');
+  return { ...actual, verifyIdToken: jest.fn() };
+});
+
+const firebase = require('../../src/integrations/firebase/firebase-admin.client');
+const { prisma, resetDb, installFetch, api, login, settle } = require('./helpers');
+
+const REQ_ID = '36697a704157303534313839';
+const GOOD_OTP = '654321'; // accepted by the fake MSG91 in helpers.installFetch
+const idToken = (name) => `eyJhbGciOiJSUzI1NiJ9.${name}.c2ln`;
+const IDENTITIES = {
+  [idToken('asha')]: { uid: 'uid-asha', email: 'asha@example.com', emailVerified: true, name: 'Asha Rao', provider: 'google.com' },
+  [idToken('noname')]: { uid: 'uid-noname', email: 'noname@example.com', emailVerified: true, name: null, provider: 'google.com' },
+  [idToken('meera')]: { uid: 'uid-meera', email: 'meera@example.com', emailVerified: true, name: 'Meera', provider: 'google.com' },
+};
+
+let fake;
+let app;
+
+beforeAll(async () => {
+  await resetDb();
+  fake = installFetch();
+  app = api();
+  firebase.verifyIdToken.mockImplementation(async (token) => {
+    if (IDENTITIES[token]) return IDENTITIES[token];
+    throw new firebase.FirebaseAuthError('Invalid Google sign-in token', { statusCode: 401, code: 'INVALID_ID_TOKEN' });
+  });
+});
+
+afterAll(async () => {
+  fake.restore();
+  await settle();
+  await prisma.$disconnect();
+});
+
+const googleLogin = async (name) => {
+  const res = await app.post('/api/auth/google').send({ idToken: idToken(name) });
+  return { ...res.body, auth: { Authorization: `Bearer ${res.body.token}` } };
+};
+const putProfile = (auth, body) => app.put('/api/v1/users/me/profile').set(auth).send(body);
+
+describe('mobile OTP sign-up: name required, email optional', () => {
+  test('login says what is missing; name alone completes it; email can be added, changed and removed', async () => {
+    const res = await app.post('/api/auth/mobile-verify').send({ mobile: '9100000101', otp: GOOD_OTP, reqId: REQ_ID });
+    expect(res.body.profile).toEqual({ complete: false, missing: ['name'] });
+    const auth = { Authorization: `Bearer ${res.body.token}` };
+
+    const missing = await putProfile(auth, {});
+    expect(missing.status).toBe(422);
+    expect(missing.body.error.details).toEqual([{ location: 'body', field: 'name', message: 'Name is required' }]);
+
+    const done = await putProfile(auth, { name: '  Ram   Kumar ' });
+    expect(done.status).toBe(200);
+    expect(done.body.data).toEqual({
+      user: { id: res.body.user.id, name: 'Ram Kumar', mobile: '+919100000101', email: null },
+      profile: { complete: true, missing: [] },
+    });
+
+    expect((await putProfile(auth, { email: 'Ram@Example.COM' })).body.data.user.email).toBe('ram@example.com');
+    expect((await putProfile(auth, { email: '' })).body.data.user.email).toBeNull();
+
+    const me = await app.get('/api/v1/users/me').set(auth);
+    expect(me.body.data.profile).toEqual({ complete: true, missing: [] });
+    const again = await login(app, '9100000101');
+    expect((await app.post('/api/auth/mobile-verify').send({ mobile: '9100000101', otp: GOOD_OTP, reqId: REQ_ID })).body.profile.complete).toBe(true);
+    expect(again.user.id).toBe(res.body.user.id);
+  });
+
+  test('names in any script; digits, symbols and invalid email are rejected', async () => {
+    const { auth } = await login(app, '9100000102');
+    for (const name of ['राम कुमार', 'ਗੁਰਪ੍ਰੀਤ ਸਿੰਘ', "D'Souza", 'A. K. Sharma-Rao']) {
+      expect((await putProfile(auth, { name })).status).toBe(200);
+    }
+    for (const body of [{ name: 'R' }, { name: '1234' }, { name: 'Ram2' }, { name: '<b>Ram</b>' }, { name: 'Ram', email: 'not-an-email' }, { name: 'Ram', role: 'ADMIN' }]) {
+      const res = await putProfile(auth, body);
+      expect(res.status).toBe(422);
+      expect(res.body.error.code).toBe('VALIDATION_FAILED');
+    }
+    const user = await prisma.user.findFirst({ where: { mobile: '+919100000102' } });
+    expect(user.role).toBe('USER');
+  });
+
+  test('a user who already has a mobile cannot swap it here', async () => {
+    const { auth } = await login(app, '9100000103');
+    const res = await putProfile(auth, { name: 'Ravi', mobile: '9100000199', otp: GOOD_OTP, reqId: REQ_ID });
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe('MOBILE_ALREADY_SET');
+    // Sending the same number again is harmless.
+    expect((await putProfile(auth, { name: 'Ravi', mobile: '+91 91000 00103' })).status).toBe(200);
+  });
+});
+
+describe('Google sign-up: name + OTP-verified mobile required', () => {
+  test('Google name is kept; mobile needs a correct OTP; afterwards OTP login opens the same account', async () => {
+    const g = await googleLogin('asha');
+    expect(g.profile).toEqual({ complete: false, missing: ['mobile'] });
+
+    const noMobile = await putProfile(g.auth, { name: 'Asha Rao' });
+    expect(noMobile.status).toBe(422);
+    expect(noMobile.body.error.details.map((d) => d.field)).toEqual(['mobile']);
+
+    const noOtp = await putProfile(g.auth, { mobile: '9100000201' });
+    expect(noOtp.status).toBe(400);
+    expect(noOtp.body.error.code).toBe('INVALID_OTP_FORMAT');
+
+    const wrongOtp = await putProfile(g.auth, { mobile: '9100000201', otp: '000000', reqId: REQ_ID });
+    expect(wrongOtp.status).toBe(401);
+    expect(wrongOtp.body.error.code).toBe('INVALID_OTP');
+    expect((await prisma.user.findUnique({ where: { firebaseUid: 'uid-asha' } })).mobile).toBeNull();
+
+    const ok = await putProfile(g.auth, { mobile: '9100000201', otp: GOOD_OTP, reqId: REQ_ID });
+    expect(ok.status).toBe(200);
+    expect(ok.body.data).toEqual({
+      user: { id: g.user.id, name: 'Asha Rao', mobile: '+919100000201', email: 'asha@example.com' },
+      profile: { complete: true, missing: [] },
+    });
+    expect(fake.callsTo(/verifyOtp$/).pop().body).toMatchObject({ reqId: REQ_ID, otp: GOOD_OTP });
+
+    // The same person can now also log in with that number, into the same account.
+    expect((await login(app, '9100000201')).user.id).toBe(g.user.id);
+    expect((await googleLogin('asha')).profile).toEqual({ complete: true, missing: [] });
+  });
+
+  test('Google account without a name must send both name and mobile', async () => {
+    const g = await googleLogin('noname');
+    expect(g.profile).toEqual({ complete: false, missing: ['name', 'mobile'] });
+    const res = await putProfile(g.auth, {});
+    expect(res.body.error.details.map((d) => d.field)).toEqual(['name', 'mobile']);
+    const ok = await putProfile(g.auth, { name: 'Kiran Patel', mobile: '9100000202', otp: GOOD_OTP, reqId: REQ_ID });
+    expect(ok.body.data.profile).toEqual({ complete: true, missing: [] });
+  });
+
+  test('a number that already has an account is refused (after OTP), nothing is merged', async () => {
+    const existing = await login(app, '9100000203');
+    const g = await googleLogin('meera');
+    const res = await putProfile(g.auth, { name: 'Meera', mobile: '9100000203', otp: GOOD_OTP, reqId: REQ_ID });
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe('MOBILE_IN_USE');
+    expect((await prisma.user.findUnique({ where: { firebaseUid: 'uid-meera' } })).mobile).toBeNull();
+    expect((await login(app, '9100000203')).user.id).toBe(existing.user.id);
+  });
+
+  test('requires login', async () => {
+    expect((await app.put('/api/v1/users/me/profile').send({ name: 'X Y' })).status).toBe(401);
+  });
+});
