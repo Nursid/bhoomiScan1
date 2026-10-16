@@ -187,6 +187,42 @@ left behind by a crashed worker expires and is picked up again. Owners can retry
 * `http`: an external REST API, with `Idempotency-Key = snapshot id`.
 * `bsc`: the reference project's `LandVerification` contract via ethers.
 
+### Uploaded document integrity and version lineage
+
+The authenticated `/documents` API hashes the submitted PDF/image bytes with SHA-256 and sends only that
+`bytes32` hash to `LandVerification`. Original bytes are uploaded to the configured authenticated Zoho Catalyst
+Stratus bucket; PostgreSQL stores metadata, registration history, and the private object key, not the bytes. The
+backend only returns file content after checking the authenticated owner and rechecking its size and SHA-256 hash.
+Mocked unit tests cover the application path. A separate live Development-bucket smoke test uploaded and downloaded
+a harmless temporary text object, verified byte-for-byte and SHA-256 equality, scheduled exact-key cleanup, and later
+confirmed the object was absent. That smoke test did not exercise a PDF/image request through the API or PostgreSQL;
+the storage migration remains unapplied while a dedicated local test database is unavailable.
+
+Each document series has a UUID and a monotonically increasing version number. A new version must name the
+latest version it replaces, belong to the same authenticated owner, and becomes its sole successor. Same-owner
+same-hash submissions remain idempotent. `GET /documents/:id/versions` returns the owner-scoped series oldest
+first. Each registration records the chain ID returned by the RPC after the provider checks it against the
+configured chain. Pending writes retain that verified chain ID with the original transaction hash.
+
+```mermaid
+flowchart LR
+  U[Authenticated user] -->|raw PDF/image bytes| API[Documents API]
+  API --> H[SHA-256 actual bytes]
+  API --> DB[(PostgreSQL: owner, series/version, hash, status, chain ID, tx hash)]
+  H -->|hash only| C[LandVerification contract]
+  C --> B[Configured BSC network]
+  B -->|receipt / status| DB
+  U -->|upload bytes or verify saved registration| API
+  API -->|read-only verifyLandData hash call| C
+  API -->|version history and verification result| U
+```
+
+When a submission is pending, the worker retries receipt recovery using the original transaction hash; it does
+not submit a replacement transaction. A reverted receipt is terminal for that attempt and remains visible in
+history. Original-file retention is implemented through Stratus and the direct storage API path has passed the limited
+Development-bucket smoke test described in `docs/STRATUS_STORAGE.md`. Full database-backed document registration and
+live BSC registration remain unverified.
+
 ### Payments
 
 * `POST /subscriptions/create` creates a PENDING subscription. While it is unpaid, calling again for the same plan returns the same subscription.
@@ -348,6 +384,6 @@ retried after a timeout, because Surepass may already have processed and charged
 
 * The rate-limit store is per instance. Behind several instances, use a shared store (Redis) or a gateway.
 * The `http` smart-contract provider treats a 2xx response as stored. If the real API confirms asynchronously, add a confirmation poller.
-* With the `bsc` provider, if `tx.wait` times out after the transaction was broadcast, the retry gets `DuplicateVerification` and the record is marked `ALREADY_STORED`, but without the tx hash. A poller that reads the hash back on chain would close that gap.
+* The `bsc` provider preserves a broadcast transaction hash and recovers its receipt on retry before considering a new registration. This is covered by mocked provider tests; live BSC testnet behavior remains unverified.
 * There are no admin endpoints for plans yet. Plans are seeded with `npm run db:seed`.
 * Alert delivery (push, SMS, email) is a hook (`alerts.service.notify`). Only database storage and logging are implemented.

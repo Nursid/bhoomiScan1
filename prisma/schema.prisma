@@ -143,6 +143,7 @@ model User {
   landVerifications LandVerification[]
   alerts            Alert[]
   apiRequestLogs    ApiRequestLog[]
+  uploadedDocuments UploadedDocument[]
 
   @@map("users")
 }
@@ -376,6 +377,47 @@ model SmartContractRecord {
   @@index([dataHash])
   @@index([landVerificationId])
   @@map("smart_contract_records")
+}
+
+// Uploaded files are hashed in memory; original file bytes are intentionally not retained.
+model UploadedDocument {
+  id               String   @id @default(uuid()) @db.Uuid
+  userId           String   @map("user_id") @db.Uuid
+  documentSeriesId String   @default(uuid()) @map("document_series_id") @db.Uuid
+  versionNumber    Int      @default(1) @map("version_number")
+  previousVersionId String? @unique @map("previous_version_id") @db.Uuid
+  fileName         String   @map("file_name")
+  contentType      String   @map("content_type")
+  sizeBytes        Int      @map("size_bytes")
+  dataHash         String   @map("data_hash")
+  storageObjectKey String?  @unique @map("storage_object_key")
+  status           String   @default("PENDING")
+  transactionHash  String?  @map("transaction_hash")
+  network          String?
+  chainId          Int?     @map("chain_id")
+  contractAddress  String?  @map("contract_address")
+  signerAddress    String?  @map("signer_address")
+  blockNumber      Int?     @map("block_number")
+  verificationId   String?  @map("verification_id")
+  errorCode        String?  @map("error_code")
+  attempts         Int      @default(0)
+  maxAttempts      Int      @default(8) @map("max_attempts")
+  nextRetryAt      DateTime? @map("next_retry_at")
+  lastAttemptAt    DateTime? @map("last_attempt_at")
+  lockedUntil      DateTime? @map("locked_until")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id])
+  previousVersion UploadedDocument? @relation("UploadedDocumentVersions", fields: [previousVersionId], references: [id], onDelete: Restrict)
+  nextVersion     UploadedDocument? @relation("UploadedDocumentVersions")
+
+  @@unique([userId, dataHash])
+  @@unique([userId, documentSeriesId, versionNumber])
+  @@index([userId, createdAt])
+  @@index([userId, documentSeriesId])
+  @@index([status, nextRetryAt])
+  @@map("uploaded_documents")
 }
 
 /* ------------------------------------------------------------------ */

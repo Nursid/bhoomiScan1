@@ -117,6 +117,14 @@ const schema = z.object({
   LAND_VERIFICATION_CONTRACT_ADDRESS: str(''),
   OPERATOR_PRIVATE_KEY: str(''),
 
+  // Zoho Catalyst Stratus REST API (India data center for the configured bucket).
+  STRATUS_BUCKET_NAME: str(''),
+  STRATUS_BUCKET_URL: url(''),
+  STRATUS_PROJECT_ID: str(''),
+  STRATUS_OAUTH_CLIENT_ID: str(''),
+  STRATUS_OAUTH_CLIENT_SECRET: str(''),
+  STRATUS_OAUTH_REFRESH_TOKEN: str(''),
+
   JOBS_ENABLED: bool(true),
   JOB_RECURRING_VERIFICATION_INTERVAL_SECONDS: int(300, { min: 5 }),
   JOB_SMART_CONTRACT_RETRY_INTERVAL_SECONDS: int(60, { min: 5 }),
@@ -254,6 +262,19 @@ const config = {
       contractAddress: env.LAND_VERIFICATION_CONTRACT_ADDRESS,
       privateKey: env.OPERATOR_PRIVATE_KEY,
     },
+  },
+
+  stratus: {
+    bucketName: env.STRATUS_BUCKET_NAME,
+    bucketUrl: env.STRATUS_BUCKET_URL,
+    projectId: env.STRATUS_PROJECT_ID,
+    oauthClientId: env.STRATUS_OAUTH_CLIENT_ID,
+    oauthClientSecret: env.STRATUS_OAUTH_CLIENT_SECRET,
+    oauthRefreshToken: env.STRATUS_OAUTH_REFRESH_TOKEN,
+    accountsUrl: 'https://accounts.zoho.in',
+    apiUrl: 'https://api.catalyst.zoho.in',
+    timeoutMs: 30000,
+    maxFileBytes: 10 * 1024 * 1024,
   },
 
   jobs: {

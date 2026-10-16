@@ -11,7 +11,8 @@
  * Status flow
  *   PENDING -> PROCESSING -> STORED
  *                         -> ALREADY_STORED       (hash already anchored; reference reused)
- *                         -> FAILED (nextRetryAt) -> PROCESSING ...
+ *                         -> PENDING (broadcast tx awaiting receipt; retry scheduled)
+ *                         -> FAILED (other retryable error; nextRetryAt) -> PROCESSING ...
  *                         -> PERMANENTLY_FAILED   (non-retryable or attempts exhausted; alert raised)
  *   SKIPPED when the provider is disabled.
  *
@@ -95,14 +96,18 @@ const claim = async (recordId) => {
 
 const markFailure = async (record, error) => {
   const retryable = Boolean(error?.retryable);
+  const awaitingReceipt = error?.code === 'SMART_CONTRACT_TX_PENDING';
   const exhausted = record.attempts >= record.maxAttempts;
-  const permanent = !retryable || exhausted;
+  // Once a tx has been broadcast, attempt limits must not turn an unconfirmed
+  // transaction into a false failure. Retries only poll/recover that same hash.
+  const permanent = !awaitingReceipt && (!retryable || exhausted);
   const updated = await prisma.smartContractRecord.update({
     where: { id: record.id },
     data: {
-      status: permanent ? 'PERMANENTLY_FAILED' : 'FAILED',
+      status: awaitingReceipt ? 'PENDING' : permanent ? 'PERMANENTLY_FAILED' : 'FAILED',
       errorCode: error?.code || 'SMART_CONTRACT_ERROR',
       errorMessage: String(error?.providerMessage || error?.message || 'Unknown error').slice(0, 1000),
+      transactionHash: error?.meta?.transactionHash || undefined,
       nextRetryAt: permanent ? null : addSeconds(new Date(), backoffSeconds(record.attempts)),
       lockedUntil: null,
     },
@@ -165,6 +170,7 @@ const processRecord = async (recordId) => {
     const result = await provider.store({
       referenceId: record.snapshotId,
       dataHash: record.dataHash,
+      transactionHash: record.transactionHash,
       propertyId: record.propertyId,
       record: record.snapshot.normalizedData,
       metadata: {

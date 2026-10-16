@@ -1,6 +1,15 @@
 const hre = require("hardhat");
 
 async function main() {
+  if (hre.network.name !== "bscTestnet") {
+    throw new Error("This prepared deployment script is testnet-only. Select bscTestnet (chain ID 97).");
+  }
+
+  const network = await hre.ethers.provider.getNetwork();
+  if (network.chainId !== 97n) {
+    throw new Error(`Refusing deployment: expected BSC testnet chain ID 97, got ${network.chainId}.`);
+  }
+
   console.log("==================================================");
   console.log("Deploying LandVerification contract...");
   console.log("Network:", hre.network.name);
@@ -22,7 +31,6 @@ async function main() {
   console.log("LandVerification deployed successfully to:", address);
   console.log("Transaction hash:", landVerification.deploymentTransaction().hash);
 
-  const network = await hre.ethers.provider.getNetwork();
   const deploymentInfo = {
     contract: "LandVerification",
     network: hre.network.name,
