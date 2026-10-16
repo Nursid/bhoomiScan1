@@ -10,25 +10,19 @@
   "projects": [
     {
       "idx": 1,
-      "id": "52236000000013051",
-      "name": "BhoomiScan",
+      "id": "81575000000055001",
+      "name": "Project-Bhoomi",
       "domain": {
-        "id": "50046525593",
-        "name": "bhoomiscan-60090479026.development"
+        "id": "50046914015",
+        "name": "project-bhoomi-60090931595.development"
       },
       "timezone": "Asia/Kolkata",
       "env": [
         {
           "idx": 1,
-          "id": "60090479026",
+          "id": "60090931595",
           "name": "Development",
           "type": 3
-        },
-        {
-          "idx": 2,
-          "id": "50046531043",
-          "name": "Production",
-          "type": 1
         }
       ]
     }

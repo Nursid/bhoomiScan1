@@ -127,6 +127,7 @@ const schema = z.object({
   RATE_LIMIT_GLOBAL_MAX: int(300, { min: 1 }),
   RATE_LIMIT_OTP_VERIFY_MAX: int(10, { min: 1 }),
   RATE_LIMIT_GOOGLE_LOGIN_MAX: int(20, { min: 1 }),
+    RATE_LIMIT_ADMIN_LOGIN_MAX: int(10, { min: 1 }),
   RATE_LIMIT_LAND_VERIFY_MAX: int(20, { min: 1 }),
 });
 
@@ -268,6 +269,7 @@ const config = {
     globalMax: env.RATE_LIMIT_GLOBAL_MAX,
     otpVerifyMax: env.RATE_LIMIT_OTP_VERIFY_MAX,
     googleLoginMax: env.RATE_LIMIT_GOOGLE_LOGIN_MAX,
+        adminLoginMax: env.RATE_LIMIT_ADMIN_LOGIN_MAX,
     landVerifyMax: env.RATE_LIMIT_LAND_VERIFY_MAX,
   },
 };

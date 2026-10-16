@@ -7,6 +7,7 @@ const paymentsRoutes = require('../modules/payments/payments.routes');
 const landVerificationRoutes = require('../modules/land-verification/land-verification.routes');
 const smartContractRoutes = require('../modules/smart-contract/smart-contract.routes');
 const alertsRoutes = require('../modules/alerts/alerts.routes');
+const adminRoutes = require('../modules/admin/admin.routes');
 
 const router = Router();
 
@@ -17,5 +18,6 @@ router.use('/payments', paymentsRoutes);
 router.use('/land-verification', landVerificationRoutes);
 router.use('/smart-contract', smartContractRoutes);
 router.use('/alerts', alertsRoutes);
+router.use('/admin', adminRoutes);
 
 module.exports = router;

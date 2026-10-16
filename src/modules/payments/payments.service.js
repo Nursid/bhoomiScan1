@@ -17,6 +17,7 @@ const { Prisma } = require('@prisma/client');
 const { prisma } = require('../../database/prisma');
 const razorpay = require('../../integrations/razorpay/razorpay.client');
 const subscriptionsService = require('../subscriptions/subscriptions.service');
+const alertsService = require('../alerts/alerts.service');
 const logger = require('../../utils/logger');
 const { fromUnixSeconds } = require('../../utils/dates');
 const { AppError, notFound, conflict, badRequest } = require('../../utils/errors');
@@ -152,7 +153,18 @@ const applyPaymentSuccess = async (payment, entity, via) => {
       const subscription = await tx.subscription.findUnique({ where: { id: payment.subscriptionId }, include: { plan: true } });
       return { payment: current, subscription, alreadyProcessed: true };
     }
-    const subscription = await subscriptionsService.activateSubscription(tx, payment.subscriptionId, paidAt);
+        const subscription = await subscriptionsService.activateSubscription(tx, payment.subscriptionId, paidAt);
+    await alertsService.createAlert(
+      {
+        userId: payment.userId,
+        type: 'PAYMENT_SUCCESS',
+        severity: 'INFO',
+        title: 'Payment successful',
+        message: `Payment of ${(payment.amount / 100).toFixed(2)} ${payment.currency} received${subscription.plan?.name ? ` for the ${subscription.plan.name} plan` : ''}.`,
+        data: { paymentId: payment.id, orderId: payment.providerOrderId, razorpayPaymentId: entity.id, amount: payment.amount, currency: payment.currency, subscriptionId: subscription.id, planName: subscription.plan?.name || null },
+      },
+      tx,
+    );
     logger.info({ paymentId: payment.id, subscriptionId: subscription.id, via }, 'payment succeeded');
     return { payment: current, subscription, alreadyProcessed: false };
   });
@@ -170,8 +182,20 @@ const applyPaymentFailure = async (payment, entity) => {
         providerData: { ...(payment.providerData || {}), payment: auditEntity(entity) },
       },
     });
-    if (count > 0) {
+      if (count > 0) {
       await tx.subscription.updateMany({ where: { id: payment.subscriptionId, status: 'PENDING' }, data: { status: 'FAILED' } });
+      const subscription = await tx.subscription.findUnique({ where: { id: payment.subscriptionId }, include: { plan: true } });
+      await alertsService.createAlert(
+        {
+          userId: payment.userId,
+          type: 'PAYMENT_FAILED',
+          severity: 'WARNING',
+          title: 'Payment failed',
+          message: `Payment of ${(payment.amount / 100).toFixed(2)} ${payment.currency} failed: ${reason}`.slice(0, 500),
+          data: { paymentId: payment.id, orderId: payment.providerOrderId, razorpayPaymentId: entity?.id || null, amount: payment.amount, currency: payment.currency, subscriptionId: payment.subscriptionId, planName: subscription?.plan?.name || null, reason },
+        },
+        tx,
+      );
     }
     return count > 0;
   });

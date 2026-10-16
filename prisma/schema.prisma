@@ -13,6 +13,7 @@
 
 generator client {
   provider = "prisma-client-js"
+  previewFeatures = ["relationJoins"]
   // "native" = this machine (local dev). Zoho Catalyst AppSail (node20) runs Debian with
   // OpenSSL 1.1 and uses the uploaded node_modules as-is (it never re-runs `prisma generate`).
   // debian-openssl-3.0.x is kept in case the AppSail image moves to OpenSSL 3.
@@ -104,6 +105,8 @@ enum AlertType {
   LAND_RECORD_CHANGED
   VERIFICATION_FAILED
   SMART_CONTRACT_FAILED
+  PAYMENT_SUCCESS
+  PAYMENT_FAILED
 }
 
 enum AlertSeverity {
@@ -129,6 +132,7 @@ model User {
   firebaseUid String?    @unique @map("firebase_uid")
   name        String?
   email       String?
+  passwordHash String?   @map("password_hash")
   role        UserRole   @default(USER)
   status      UserStatus @default(ACTIVE)
   lastLoginAt DateTime?  @map("last_login_at")
