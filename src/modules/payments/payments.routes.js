@@ -2,10 +2,12 @@
  *   POST /payments/create     auth   { subscriptionId }
  *   POST /payments/verify     auth   { razorpay_order_id, razorpay_payment_id, razorpay_signature }
  *   POST /payments/webhook    Razorpay (x-razorpay-signature over the raw body)
+ *   POST /payments/callback   Checkout redirect (form post; checkout signature) -> 303 /payment?status=
  *   GET  /payments            auth   history
  */
 
-const { Router } = require('express');
+const express = require('express');
+const { Router } = express;
 const { z } = require('zod');
 const { authenticate } = require('../../middleware/authenticate');
 const validate = require('../../middleware/validate');
@@ -24,6 +26,8 @@ const verifySchema = z
 const router = Router();
 
 router.post('/webhook', controller.webhook);
+// Checkout redirect callback: a form POST from the user's browser, no login token.
+router.post('/callback', express.urlencoded({ extended: false, limit: '20kb' }), controller.callback);
 
 router.use(authenticate);
 router.get('/', controller.list);

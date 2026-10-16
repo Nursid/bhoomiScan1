@@ -179,8 +179,13 @@ const applyPaymentFailure = async (payment, entity) => {
 
 /* --------------------------------- Verify -------------------------------- */
 
+/**
+ * @param {string|null} userId  logged-in user (POST /verify), or null for the Checkout
+ *                              redirect callback, where the signature (HMAC with our key
+ *                              secret over order|payment) is the only proof of origin.
+ */
 const verifyPayment = async (userId, { razorpay_order_id: orderId, razorpay_payment_id: paymentId, razorpay_signature: signature }) => {
-  const payment = await prisma.payment.findFirst({ where: { providerOrderId: orderId, userId } });
+  const payment = await prisma.payment.findFirst({ where: { providerOrderId: orderId, ...(userId ? { userId } : {}) } });
   if (!payment) {
     throw notFound('Payment not found', 'PAYMENT_NOT_FOUND');
   }

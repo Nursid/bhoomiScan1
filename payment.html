@@ -44,19 +44,60 @@
     }
 
     .plan {
-      border: 1px solid #ddd;
+      display: block;
+      width: 100%;
+      text-align: left;
+      background: white;
+      color: #111827;
+      border: 2px solid #ddd;
       padding: 18px;
       border-radius: 12px;
-      margin-bottom: 20px;
+      margin-bottom: 14px;
+      font-size: 14px;
+    }
+
+    .plan:hover {
+      border-color: #9ca3af;
+    }
+
+    .plan.selected {
+      border-color: #111827;
+      background: #f9fafb;
     }
 
     .plan h2 {
       margin: 0 0 8px;
+      font-size: 20px;
+    }
+
+    .plan p {
+      margin: 0 0 10px;
+      color: #4b5563;
+    }
+
+    .plan ul {
+      margin: 10px 0 0;
+      padding-left: 18px;
+      color: #4b5563;
     }
 
     .price {
       font-size: 28px;
       font-weight: bold;
+    }
+
+    .price small {
+      font-size: 14px;
+      font-weight: normal;
+      color: #6b7280;
+    }
+
+    #plans {
+      margin-bottom: 20px;
+    }
+
+    .muted {
+      color: #6b7280;
     }
 
     button {
@@ -107,20 +148,13 @@
       Razorpay Test Checkout
     </div>
 
-    <div class="plan">
-      <h2>Monthly Plan</h2>
-
-      <p>
-        Land verification with recurring monitoring.
-      </p>
-
-      <div class="price">
-        ₹1
-      </div>
+    <!-- Filled from GET /api/v1/plans -->
+    <div id="plans" role="radiogroup" aria-label="Plans">
+      <p class="muted">Loading plans…</p>
     </div>
 
-    <button id="payButton">
-      Pay ₹1
+    <button id="payButton" disabled>
+      Select a plan
     </button>
 
     <div id="status"></div>
@@ -169,16 +203,111 @@
 
 
     // =========================================================
+    // PLANS (GET /api/v1/plans, no login needed)
+    // =========================================================
+
+    const plansBox = document.getElementById("plans");
+    let selectedPlan = null;
+
+    const INTERVAL_LABEL = { MONTHLY: "month", QUARTERLY: "3 months", YEARLY: "year" };
+
+    const formatPrice = (plan) =>
+      `${plan.currency === "INR" ? "₹" : plan.currency + " "}${Number(plan.amountDisplay).toLocaleString("en-IN")}`;
+
+    const el = (tag, props = {}, children = []) => {
+      const node = Object.assign(document.createElement(tag), props);
+      children.forEach((child) => node.append(child));
+      return node;
+    };
+
+    function selectPlan(plan, card) {
+      selectedPlan = plan;
+      plansBox.querySelectorAll(".plan").forEach((node) => {
+        node.classList.toggle("selected", node === card);
+        node.setAttribute("aria-checked", String(node === card));
+      });
+      payButton.disabled = false;
+      payButton.textContent = `Pay ${formatPrice(plan)}`;
+    }
+
+    function planCard(plan) {
+      const period = INTERVAL_LABEL[plan.interval] || `${plan.durationMonths} month(s)`;
+      const card = el("button", { type: "button", className: "plan" }, [
+        el("h2", { textContent: plan.name }),
+        el("p", { textContent: plan.description || "" }),
+        el("div", { className: "price" }, [formatPrice(plan), el("small", { textContent: ` / ${period}` })]),
+        el("ul", {}, [
+          el("li", { textContent: `Monitor up to ${plan.maxMonitoredLands} land record(s)` }),
+          el("li", { textContent: `Check frequency: ${plan.allowedFrequencies.map((f) => f.toLowerCase()).join(", ")}` }),
+        ]),
+      ]);
+      card.setAttribute("role", "radio");
+      card.setAttribute("aria-checked", "false");
+      card.addEventListener("click", () => selectPlan(plan, card));
+      return card;
+    }
+
+    async function loadPlans() {
+      try {
+        const response = await fetch(`${API_BASE}/api/v1/plans`);
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok || !body.success) {
+          throw new Error(body?.error?.message || body?.message || `HTTP ${response.status}`);
+        }
+        const plans = body.data.plans || [];
+        if (plans.length === 0) {
+          plansBox.replaceChildren(el("p", { className: "muted", textContent: "No plans available right now." }));
+          return;
+        }
+        const cards = plans.map(planCard);
+        plansBox.replaceChildren(...cards);
+        selectPlan(plans[0], cards[0]);
+      } catch (error) {
+        console.error("Plans error:", error);
+        plansBox.replaceChildren(el("p", { className: "muted", textContent: "Could not load plans." }));
+        showStatus(`Could not load plans.\n\n${error.message}`, "error");
+      }
+    }
+
+    loadPlans();
+
+
+    // =========================================================
+    // RESULT AFTER A CHECKOUT REDIRECT (/payment?status=...)
+    // =========================================================
+
+    (function showRedirectResult() {
+      const params = new URLSearchParams(window.location.search);
+      const result = params.get("status");
+      if (!result) return;
+      const messages = {
+        success: [`🎉 PAYMENT VERIFIED SUCCESSFULLY!\n\nPayment ID: ${params.get("paymentId") || "-"}\nSubscription: ${params.get("subscriptionId") || "-"}`, "success"],
+        pending: [`Payment received, confirmation pending.\n\nPayment ID: ${params.get("paymentId") || "-"}\nYour subscription activates as soon as Razorpay confirms it.`, ""],
+        failed: [`Payment failed.\n\n${params.get("reason") || ""}`, "error"],
+      };
+      const [message, type] = messages[result] || messages.failed;
+      showStatus(message, type);
+      // Drop the query so a refresh doesn't show it again.
+      history.replaceState(null, "", window.location.pathname);
+    })();
+
+
+    // =========================================================
     // MAIN PAYMENT FLOW
     // =========================================================
 
     payButton.addEventListener("click", async () => {
 
+      if (!selectedPlan) {
+        showStatus("Please select a plan first.", "error");
+        return;
+      }
+
       try {
 
         payButton.disabled = true;
 
-        showStatus("Creating subscription...");
+        showStatus(`Creating ${selectedPlan.name} subscription...`);
 
 
         // -----------------------------------------------------
@@ -196,7 +325,7 @@
             },
 
             body: JSON.stringify({
-              planCode: "monthly"
+              planCode: selectedPlan.code
             })
           }
         );
@@ -313,6 +442,10 @@
           description: checkout.description,
 
           order_id: checkout.orderId,
+
+          // Used when Checkout leaves the page (bank / 3-D Secure, blocked popup, mobile):
+          // Razorpay posts the result to the API, which verifies it and returns here.
+          callback_url: `${API_BASE}/api/v1/payments/callback`,
 
 
           // ---------------------------------------------------

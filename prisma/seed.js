@@ -1,39 +1,53 @@
 /**
- * Seeds subscription plans (idempotent upsert by code).
- * Prices mirror the reference project's defaults (monthly 591, quarterly 1599 INR),
- * stored in paise.
+ * Seeds subscription plans (idempotent upsert by code). Amounts are in paise.
+ *
+ * Both plans give 12 months of access; they differ in how often a parcel is
+ * re-checked automatically (allowedFrequencies):
+ *   monthly  ₹999 / year   monthly checks
+ *   weekly   ₹1499 / year  weekly (or monthly) checks
+ *
+ * Plans not listed here are deactivated, never deleted: past subscriptions keep
+ * pointing at them, but they can no longer be bought.
  */
 
 const { PrismaClient } = require('@prisma/client');
 
 const prisma = new PrismaClient();
 
+const FEATURES = {
+  recurringVerification: true,
+  changeAlerts: true,
+  smartContractAnchoring: true,
+};
+
 const PLANS = [
   {
     code: 'monthly',
     name: 'Monthly',
-    description: 'Land verification with recurring monitoring, billed monthly.',
-    amount: 100, // paise = ₹1 (Razorpay minimum)
+    description: 'One year of land verification with monthly automatic checks.',
+    amount: 99900, // ₹999 in paise
     currency: 'INR',
-    interval: 'MONTHLY',
-    durationMonths: 1,
-    allowedFrequencies: ['WEEKLY', 'MONTHLY'],
+    interval: 'YEARLY',
+    durationMonths: 12,
+    allowedFrequencies: ['MONTHLY'],
     maxMonitoredLands: 5,
     sortOrder: 1,
-    features: { recurringVerification: true, changeAlerts: true, smartContractAnchoring: true },
+    isActive: true,
+    features: FEATURES,
   },
   {
-    code: 'quarterly',
-    name: 'Quarterly',
-    description: 'Land verification with recurring monitoring, billed every 3 months.',
-    amount: 100, // paise = ₹1 (Razorpay minimum)
+    code: 'weekly',
+    name: 'Weekly',
+    description: 'One year of land verification with weekly automatic checks.',
+    amount: 149900, // ₹1499 in paise
     currency: 'INR',
-    interval: 'QUARTERLY',
-    durationMonths: 3,
-    allowedFrequencies: ['WEEKLY', 'MONTHLY', 'QUARTERLY'],
+    interval: 'YEARLY',
+    durationMonths: 12,
+    allowedFrequencies: ['WEEKLY', 'MONTHLY'],
     maxMonitoredLands: 20,
     sortOrder: 2,
-    features: { recurringVerification: true, changeAlerts: true, smartContractAnchoring: true },
+    isActive: true,
+    features: FEATURES,
   },
 ];
 
@@ -41,7 +55,11 @@ const main = async () => {
   for (const plan of PLANS) {
     await prisma.subscriptionPlan.upsert({ where: { code: plan.code }, create: plan, update: plan });
   }
-  console.log(`Seeded ${PLANS.length} subscription plans`);
+  const { count: retired } = await prisma.subscriptionPlan.updateMany({
+    where: { code: { notIn: PLANS.map((plan) => plan.code) }, isActive: true },
+    data: { isActive: false },
+  });
+  console.log(`Seeded ${PLANS.length} subscription plans${retired ? `, deactivated ${retired} old plan(s)` : ''}`);
 };
 
 main()

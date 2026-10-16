@@ -138,7 +138,7 @@ components:
         amount: { type: integer, description: Amount in paise, example: 59100 }
         amountDisplay: { type: string, example: '591.00' }
         currency: { type: string, example: INR }
-        interval: { type: string, enum: [MONTHLY, QUARTERLY] }
+        interval: { type: string, enum: [MONTHLY, QUARTERLY, YEARLY] }
         durationMonths: { type: integer }
         allowedFrequencies: { type: array, items: { type: string, enum: [WEEKLY, MONTHLY, QUARTERLY] } }
         maxMonitoredLands: { type: integer, nullable: true }
@@ -442,7 +442,7 @@ paths:
               type: object
               required: [planCode]
               properties:
-                planCode: { type: string, enum: [monthly, quarterly] }
+                planCode: { type: string, enum: [monthly, weekly] }
       responses:
         '201':
           description: Created

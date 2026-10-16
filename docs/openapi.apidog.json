@@ -227,7 +227,8 @@
             "type": "string",
             "enum": [
               "MONTHLY",
-              "QUARTERLY"
+              "QUARTERLY",
+              "YEARLY"
             ]
           },
           "durationMonths": {
@@ -1026,7 +1027,7 @@
                     "type": "string",
                     "enum": [
                       "monthly",
-                      "quarterly"
+                      "weekly"
                     ]
                   }
                 }
