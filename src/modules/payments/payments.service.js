@@ -15,6 +15,7 @@
 const { randomBytes, createHash } = require('crypto');
 const { Prisma } = require('@prisma/client');
 const { prisma } = require('../../database/prisma');
+const config = require('../../config');
 const razorpay = require('../../integrations/razorpay/razorpay.client');
 const subscriptionsService = require('../subscriptions/subscriptions.service');
 const logger = require('../../utils/logger');
@@ -55,7 +56,17 @@ const auditEntity = (entity) =>
       }
     : null;
 
-const newReceipt = () => `bs_${Date.now().toString(36)}_${randomBytes(6).toString('hex')}`;
+// Everything the mobile app needs to open Razorpay Checkout.
+const checkoutFor = (payment, subscription) => ({
+  keyId: razorpay.getKeyId(),
+  orderId: payment.providerOrderId,
+  amount: payment.amount,
+  currency: payment.currency,
+  name: 'BhoomiScan',
+  description: `${subscription.plan.name} subscription`,
+});
+
+const newReceipt = () =>`bs_${Date.now().toString(36)}_${randomBytes(6).toString('hex')}`;
 
 /* --------------------------------- Create -------------------------------- */
 
@@ -66,6 +77,19 @@ const createPayment = async (userId, subscriptionId) => {
   }
   if (!['PENDING', 'FAILED'].includes(subscription.status)) {
     throw conflict('This subscription is not awaiting payment', { status: subscription.status }, 'SUBSCRIPTION_NOT_PAYABLE');
+  }
+  // The user may have become paid-up (another tab, an older order) since this subscription was created.
+  await subscriptionsService.assertCanPurchase(userId);
+
+  // Double taps / reopened checkout: hand out the same unpaid order instead of a second one,
+  // so one subscription never has two payable orders at once.
+  const reuseSince = new Date(Date.now() - config.razorpay.orderReuseMinutes * 60 * 1000);
+  const open = await prisma.payment.findFirst({
+    where: { subscriptionId: subscription.id, status: 'CREATED', amount: subscription.amount, createdAt: { gte: reuseSince } },
+    orderBy: { createdAt: 'desc' },
+  });
+  if (open) {
+    return { payment: publicPayment(open), checkout: checkoutFor(open, subscription), reused: true };
   }
 
   const receipt = newReceipt();
@@ -98,18 +122,7 @@ const createPayment = async (userId, subscriptionId) => {
   });
   logger.info({ userId, paymentId: payment.id, orderId: order.id }, 'payment order created');
 
-  // Everything the mobile app needs to open Razorpay Checkout.
-  return {
-    payment: publicPayment(payment),
-    checkout: {
-      keyId: razorpay.getKeyId(),
-      orderId: order.id,
-      amount: order.amount,
-      currency: order.currency,
-      name: 'BhoomiScan',
-      description: `${subscription.plan.name} subscription`,
-    },
-  };
+  return { payment: publicPayment(payment), checkout: checkoutFor(payment, subscription), reused: false };
 };
 
 /* ------------------------- Shared success / failure ----------------------- */
@@ -152,7 +165,14 @@ const applyPaymentSuccess = async (payment, entity, via) => {
       const subscription = await tx.subscription.findUnique({ where: { id: payment.subscriptionId }, include: { plan: true } });
       return { payment: current, subscription, alreadyProcessed: true };
     }
-    const subscription = await subscriptionsService.activateSubscription(tx, payment.subscriptionId, paidAt);
+    const subscription = await subscriptionsService.activateSubscription(tx, payment.subscriptionId, paidAt, {
+      // Another payment already paid for this period: money was taken twice. Never silent.
+      onAlreadyActive: (active) =>
+        logger.error(
+          { paymentId: payment.id, subscriptionId: active.id, providerPaymentId: entity.id, code: 'DUPLICATE_PAYMENT_FOR_SUBSCRIPTION' },
+          'second successful payment for an already-active subscription; refund it',
+        ),
+    });
     logger.info({ paymentId: payment.id, subscriptionId: subscription.id, via }, 'payment succeeded');
     return { payment: current, subscription, alreadyProcessed: false };
   });

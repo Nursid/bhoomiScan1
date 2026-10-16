@@ -68,6 +68,8 @@ router.get('/:id', validate({ params: idParams }), controller.get);
 router.get('/:id/history', validate({ params: idParams, query: pageQuery }), controller.history);
 router.get('/:id/history/:snapshotId', validate({ params: snapshotParams }), controller.snapshot);
 router.get('/:id/changes', validate({ params: idParams, query: changesQuery }), controller.changes);
+// Old record / new record / differences for one verification (latest by default). Push taps open this.
+router.get('/:id/comparison', validate({ params: idParams, query: z.object({ snapshotId: z.string().uuid().optional() }) }), controller.comparison);
 // Turning monitoring off never requires a subscription.
 const subscriptionToEnable = (req, res, next) => (req.body.enabled ? requireActiveSubscription(req, res, next) : next());
 router.put('/:id/monitoring', validate({ params: idParams, body: monitoringSchema }), subscriptionToEnable, controller.monitoring);

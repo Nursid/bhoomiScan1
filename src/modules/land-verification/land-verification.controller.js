@@ -57,7 +57,9 @@ const changes = async (req, res) => {
   ok(res, { changes: items }, { meta: paginationMeta(pagination, total) });
 };
 
+const comparison = async (req, res) => ok(res, await service.getComparison(req.user.id, req.params.id, { snapshotId: req.query.snapshotId }));
+
 const monitoring = async (req, res) =>
   ok(res, { verification: await service.configureMonitoring(req.user.id, req.params.id, req.body, req.subscription) });
 
-module.exports = { states, metadata, verify, list, get, history, snapshot, changes, monitoring };
+module.exports = { states, metadata, verify, list, get, history, snapshot, changes, comparison, monitoring };

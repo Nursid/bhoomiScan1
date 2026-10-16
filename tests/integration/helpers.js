@@ -5,6 +5,8 @@ const cache = require('../../src/utils/cache');
 const { addMonths } = require('../../src/utils/dates');
 
 const TABLES = [
+  'notifications',
+  'device_tokens',
   'api_request_logs',
   'alerts',
   'smart_contract_records',

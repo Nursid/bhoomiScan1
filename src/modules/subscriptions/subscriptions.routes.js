@@ -1,8 +1,9 @@
 /**
  *   GET  /plans                          public
- *   POST /subscriptions/create           auth  { planCode }
- *   GET  /subscriptions                  auth  history
- *   GET  /subscriptions/current          auth  active + upcoming
+ *   POST /subscriptions/create           auth  { planCode }    409 while a paid period is outside the renewal window
+ *   POST /subscriptions/renew            auth  { planCode? }   last paid plan by default; planCode = change plan
+ *   GET  /subscriptions                  auth  history (one row per paid period = renewal history)
+ *   GET  /subscriptions/current          auth  status, active, upcoming, latest, pending, renewal
  *   POST /subscriptions/:id/cancel       auth  (unpaid only)
  */
 
@@ -13,15 +14,15 @@ const validate = require('../../middleware/validate');
 const { ok, created } = require('../../utils/response');
 const service = require('./subscriptions.service');
 
-const createSchema = z
-  .object({
-    planCode: z
-      .string()
-      .trim()
-      .toLowerCase()
-      .regex(/^[a-z0-9_-]{1,40}$/, 'Invalid plan code'),
-  })
-  .strict();
+const planCode = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .regex(/^[a-z0-9_-]{1,40}$/, 'Invalid plan code');
+
+const createSchema = z.object({ planCode }).strict();
+
+const renewSchema = z.object({ planCode: planCode.optional() }).strict();
 
 const idParams = z.object({ id: z.string().uuid('Invalid id') });
 
@@ -33,6 +34,11 @@ subscriptionsRouter.use(authenticate);
 
 subscriptionsRouter.post('/create', validate({ body: createSchema }), async (req, res) => {
   const result = await service.createSubscription(req.user.id, req.body.planCode);
+  return result.reused ? ok(res, result) : created(res, result);
+});
+
+subscriptionsRouter.post('/renew', validate({ body: renewSchema }), async (req, res) => {
+  const result = await service.renewSubscription(req.user.id, req.body.planCode);
   return result.reused ? ok(res, result) : created(res, result);
 });
 

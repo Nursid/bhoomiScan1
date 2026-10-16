@@ -470,9 +470,56 @@ paths:
   /api/v1/subscriptions/current:
     get:
       tags: [Plans & Subscriptions]
-      summary: Active subscription and upcoming (prepaid) periods
+      summary: Subscription page state (status, current / upcoming / last paid / pending period, renewal)
+      description: |
+        status is computed from dates: ACTIVE | EXPIRED | CANCELLED | PENDING | NONE.
+        renewal.allowed is true when there is no paid time left, or the last paid period ends
+        within SUBSCRIPTION_RENEWAL_WINDOW_DAYS; renewal.planCode is the plan Renew uses by default.
       responses:
-        '200': { description: OK }
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      status: { type: string, enum: [ACTIVE, EXPIRED, CANCELLED, PENDING, NONE] }
+                      active: { type: object, nullable: true }
+                      upcoming: { type: array, items: { type: object } }
+                      latest: { type: object, nullable: true, description: Last paid period (shown when expired) }
+                      pending: { type: object, nullable: true }
+                      renewal:
+                        type: object
+                        properties:
+                          allowed: { type: boolean }
+                          reason: { type: string, enum: [NO_ACTIVE_SUBSCRIPTION, RENEWAL_DUE, SUBSCRIPTION_ALREADY_ACTIVE] }
+                          paidUntil: { type: string, format: date-time, nullable: true }
+                          renewableFrom: { type: string, format: date-time, nullable: true }
+                          windowDays: { type: integer, example: 30 }
+                          planCode: { type: string, nullable: true }
+
+  /api/v1/subscriptions/renew:
+    post:
+      tags: [Plans & Subscriptions]
+      summary: Renew (manual) - next period of the last paid plan, or of planCode to change plan
+      description: |
+        Same result shape as /subscriptions/create (then call /payments/create). A renewal paid before
+        expiry starts when the current period ends; after expiry it starts at payment time.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                planCode: { type: string, example: weekly }
+      responses:
+        '200': { description: Existing unpaid renewal reused }
+        '201': { description: Renewal subscription created (PENDING until paid) }
+        '409': { description: 'SUBSCRIPTION_ALREADY_ACTIVE (renewal not open yet) / NOTHING_TO_RENEW / PLAN_UNAVAILABLE' }
 
   /api/v1/subscriptions/{id}/cancel:
     post:
@@ -865,6 +912,55 @@ paths:
         '200': { description: OK }
         '404': { $ref: '#/components/responses/Error' }
 
+  /api/v1/land-verification/{id}/comparison:
+    get:
+      tags: [Land Verification]
+      summary: Old record, new record and differences for one verification (push notifications open this)
+      description: |
+        Latest verification by default, or a specific one with snapshotId (from the push data).
+        status INITIAL (first record, old = null) | UNCHANGED (hasChanges false, "Everything is good") | CHANGED.
+        changes are sorted critical first; label/section are readable names for the field path.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: snapshotId, in: query, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      verificationId: { type: string, format: uuid }
+                      land: { type: object, properties: { displayName: { type: string, nullable: true }, state: { type: string }, locator: { type: object } } }
+                      snapshotId: { type: string, format: uuid }
+                      status: { type: string, enum: [INITIAL, UNCHANGED, CHANGED] }
+                      hasChanges: { type: boolean }
+                      headline: { type: object, properties: { title: { type: string, example: 'Everything is good ✅' }, body: { type: string } } }
+                      verifiedAt: { type: string, format: date-time }
+                      previousVerifiedAt: { type: string, format: date-time, nullable: true }
+                      summary: { type: object, properties: { total: { type: integer }, added: { type: integer }, removed: { type: integer }, updated: { type: integer }, critical: { type: integer } } }
+                      old: { type: object, nullable: true, properties: { snapshotId: { type: string }, verifiedAt: { type: string, format: date-time }, record: { type: object } } }
+                      new: { type: object, properties: { snapshotId: { type: string }, verifiedAt: { type: string, format: date-time }, record: { type: object } } }
+                      changes:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            field: { type: string, example: 'owner_details[]' }
+                            section: { type: string, example: Owner details }
+                            label: { type: string, example: Owner details }
+                            path: { type: array, items: { type: object } }
+                            type: { type: string, enum: [ADD, REMOVE, UPDATE] }
+                            oldValue: { nullable: true }
+                            newValue: { nullable: true }
+                            isCritical: { type: boolean }
+        '404': { description: LAND_VERIFICATION_NOT_FOUND / SNAPSHOT_NOT_FOUND }
+
   /api/v1/land-verification/{id}/changes:
     get:
       tags: [Land Verification]
@@ -936,6 +1032,44 @@ paths:
       responses:
         '200': { description: Result of the retry }
         '409': { $ref: '#/components/responses/Error' }
+
+  /api/v1/devices:
+    post:
+      tags: [Notifications]
+      summary: Register / refresh this device's FCM token (call after login and on token refresh)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, platform]
+              properties:
+                token: { type: string, description: FCM registration token }
+                platform: { type: string, enum: [android, ios, web] }
+      responses:
+        '201': { description: Registered }
+        '422': { description: Invalid token or platform }
+    delete:
+      tags: [Notifications]
+      summary: Unregister this device (call on logout)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [token], properties: { token: { type: string } } }
+      responses:
+        '200': { description: '{ removed: 0 | 1 }' }
+
+  /api/v1/notifications:
+    get:
+      tags: [Notifications]
+      summary: Notification inbox (every push, newest first)
+      parameters:
+        - { name: page, in: query, schema: { type: integer } }
+        - { name: limit, in: query, schema: { type: integer } }
+      responses:
+        '200': { description: '{ notifications: [{ id, type, title, body, data, landVerificationId, snapshotId, delivery, createdAt, sentAt }] }' }
 
   /api/v1/alerts:
     get:

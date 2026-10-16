@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-  <title>BhoomiScan - Razorpay Test</title>
+  <title>BhoomiScan - Subscription</title>
 
   <!-- Razorpay Checkout -->
   <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
@@ -22,6 +22,7 @@
       display: flex;
       justify-content: center;
       align-items: center;
+      padding: 16px;
     }
 
     .container {
@@ -42,6 +43,73 @@
       color: #666;
       margin-bottom: 25px;
     }
+
+    /* ----------------------------- current plan ----------------------------- */
+
+    .current {
+      border: 1px solid #e5e7eb;
+      border-radius: 12px;
+      padding: 18px;
+      margin-bottom: 20px;
+      background: #f9fafb;
+    }
+
+    .current-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+
+    .current-head h2 {
+      margin: 0;
+      font-size: 20px;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: bold;
+      white-space: nowrap;
+    }
+
+    .badge.active { background: #d1fae5; color: #065f46; }
+    .badge.due { background: #fef3c7; color: #92400e; }
+    .badge.expired { background: #fee2e2; color: #991b1b; }
+    .badge.pending { background: #e0e7ff; color: #3730a3; }
+
+    .facts {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 6px 14px;
+      margin: 0;
+      font-size: 14px;
+    }
+
+    .facts dt { color: #6b7280; }
+    .facts dd { margin: 0; font-weight: bold; }
+
+    .note {
+      margin: 12px 0 0;
+      font-size: 14px;
+      color: #4b5563;
+    }
+
+    .link {
+      display: inline;
+      width: auto;
+      padding: 0;
+      margin-top: 12px;
+      background: none;
+      color: #1d4ed8;
+      font-size: 14px;
+      text-decoration: underline;
+    }
+
+    /* --------------------------------- plans -------------------------------- */
 
     .plan {
       display: block;
@@ -145,16 +213,19 @@
     <h1>BhoomiScan</h1>
 
     <div class="subtitle">
-      Razorpay Test Checkout
+      Your subscription
     </div>
 
-    <!-- Filled from GET /api/v1/plans -->
+    <!-- Current plan, from GET /api/v1/subscriptions/current -->
+    <section id="current" class="current" hidden aria-live="polite"></section>
+
+    <!-- Filled from GET /api/v1/plans; hidden while a paid plan needs no action -->
     <div id="plans" role="radiogroup" aria-label="Plans">
       <p class="muted">Loading plans…</p>
     </div>
 
     <button id="payButton" disabled>
-      Select a plan
+      Loading…
     </button>
 
     <div id="status"></div>
@@ -171,8 +242,8 @@
     // Production API (Zoho Catalyst AppSail).
     const API_BASE = "https://bhoomiscan-api-50046525593.development.catalystappsail.in";
 
-    // Login token (from POST /api/auth/mobile-verify). Never hardcode it: this page is public.
-    // It is asked for once and kept only in this browser tab.
+    // Login token (from POST /api/auth/mobile-verify or /api/auth/google). Never hardcode it:
+    // this page is public. It is asked for once and kept only in this browser tab.
     let TOKEN = sessionStorage.getItem("bhoomiscanToken") || "";
     if (!TOKEN) {
       TOKEN = (prompt("Paste your login token (from /api/auth/mobile-verify):") || "").trim().replace(/^Bearer\s+/i, "");
@@ -181,38 +252,22 @@
 
 
     // =========================================================
-    // UI
+    // HELPERS
     // =========================================================
 
     const payButton = document.getElementById("payButton");
     const statusBox = document.getElementById("status");
-
-
-    function showStatus(message, type = "") {
-
-      statusBox.style.display = "block";
-
-      statusBox.className = "";
-
-      if (type) {
-        statusBox.classList.add(type);
-      }
-
-      statusBox.textContent = message;
-    }
-
-
-    // =========================================================
-    // PLANS (GET /api/v1/plans, no login needed)
-    // =========================================================
-
+    const currentBox = document.getElementById("current");
     const plansBox = document.getElementById("plans");
-    let selectedPlan = null;
 
     const INTERVAL_LABEL = { MONTHLY: "month", QUARTERLY: "3 months", YEARLY: "year" };
+    const DAY_MS = 24 * 60 * 60 * 1000;
 
-    const formatPrice = (plan) =>
-      `${plan.currency === "INR" ? "₹" : plan.currency + " "}${Number(plan.amountDisplay).toLocaleString("en-IN")}`;
+    function showStatus(message, type = "") {
+      statusBox.style.display = "block";
+      statusBox.className = type;
+      statusBox.textContent = message;
+    }
 
     const el = (tag, props = {}, children = []) => {
       const node = Object.assign(document.createElement(tag), props);
@@ -220,14 +275,55 @@
       return node;
     };
 
-    function selectPlan(plan, card) {
+    const formatPrice = (plan) =>
+      `${plan.currency === "INR" ? "₹" : plan.currency + " "}${Number(plan.amountDisplay).toLocaleString("en-IN")}`;
+
+    const formatDate = (value) =>
+      value ? new Date(value).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "-";
+
+    const daysUntil = (value) => Math.max(0, Math.ceil((new Date(value).getTime() - Date.now()) / DAY_MS));
+
+    /** Authenticated JSON call; throws Error with .code / .status from the API's error shape. */
+    async function api(method, path, body) {
+      const response = await fetch(`${API_BASE}${path}`, {
+        method,
+        headers: { "Authorization": `Bearer ${TOKEN}`, ...(body ? { "Content-Type": "application/json" } : {}) },
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok || json.success === false) {
+        const error = new Error(json?.error?.message || json?.message || `HTTP ${response.status}`);
+        error.code = json?.error?.code;
+        error.status = response.status;
+        throw error;
+      }
+      return json.data;
+    }
+
+
+    // =========================================================
+    // STATE
+    // =========================================================
+
+    let plans = [];
+    let subscription = null;   // GET /subscriptions/current
+    let selectedPlan = null;
+    let showPicker = false;    // "Change plan" opened while renewing
+    let busy = false;
+
+
+    // =========================================================
+    // PLANS
+    // =========================================================
+
+    function selectPlan(plan) {
       selectedPlan = plan;
       plansBox.querySelectorAll(".plan").forEach((node) => {
-        node.classList.toggle("selected", node === card);
-        node.setAttribute("aria-checked", String(node === card));
+        const on = node.dataset.code === plan.code;
+        node.classList.toggle("selected", on);
+        node.setAttribute("aria-checked", String(on));
       });
-      payButton.disabled = false;
-      payButton.textContent = `Pay ${formatPrice(plan)}`;
+      renderAction();
     }
 
     function planCard(plan) {
@@ -241,35 +337,258 @@
           el("li", { textContent: `Check frequency: ${plan.allowedFrequencies.map((f) => f.toLowerCase()).join(", ")}` }),
         ]),
       ]);
+      card.dataset.code = plan.code;
       card.setAttribute("role", "radio");
       card.setAttribute("aria-checked", "false");
-      card.addEventListener("click", () => selectPlan(plan, card));
+      card.addEventListener("click", () => selectPlan(plan));
       return card;
     }
 
     async function loadPlans() {
-      try {
-        const response = await fetch(`${API_BASE}/api/v1/plans`);
-        const body = await response.json().catch(() => ({}));
-        if (!response.ok || !body.success) {
-          throw new Error(body?.error?.message || body?.message || `HTTP ${response.status}`);
+      const response = await fetch(`${API_BASE}/api/v1/plans`);
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok || !body.success) {
+        throw new Error(body?.error?.message || body?.message || `HTTP ${response.status}`);
+      }
+      plans = body.data.plans || [];
+      plansBox.replaceChildren(
+        ...(plans.length ? plans.map(planCard) : [el("p", { className: "muted", textContent: "No plans available right now." })]),
+      );
+    }
+
+
+    // =========================================================
+    // CURRENT PLAN CARD
+    // =========================================================
+
+    // What the page offers, derived only from the backend's answer.
+    //   buy      no plan yet: pick a plan and pay
+    //   pending  unpaid subscription: finish paying (no access until confirmed)
+    //   none     paid and renewal not open yet: nothing to buy
+    //   renew    renewal open (due soon) or plan expired
+    function mode() {
+      if (!subscription) return "loading";
+      const { status, renewal } = subscription;
+      if (status === "ACTIVE") return renewal.allowed ? "renew" : "none";
+      if (status === "EXPIRED" || status === "CANCELLED") return "renew";
+      if (status === "PENDING") return "pending";
+      return "buy";
+    }
+
+    function planFacts(sub) {
+      const plan = sub.plan || {};
+      return [
+        ["Plan", `${plan.name || "-"} (${formatPrice(plan)} / ${INTERVAL_LABEL[plan.interval] || `${plan.durationMonths} months`})`],
+        ["Lands", `Up to ${plan.maxMonitoredLands ?? "unlimited"}`],
+        ["Checks", (plan.allowedFrequencies || []).map((f) => f.toLowerCase()).join(", ") || "-"],
+      ];
+    }
+
+    function renderCurrent() {
+      const { status, active, upcoming, latest, pending, renewal } = subscription;
+      let title = "";
+      let badge = null;
+      let facts = [];
+      const notes = [];
+
+      if (status === "ACTIVE") {
+        const dueSoon = renewal.allowed && upcoming.length === 0;
+        title = "Current plan";
+        badge = dueSoon ? ["Renewal due soon", "due"] : ["Active", "active"];
+        facts = [
+          ...planFacts(active),
+          ["Activated", formatDate(active.activatedAt)],
+          ["Valid from", formatDate(active.startsAt)],
+          ["Expires", formatDate(active.endsAt)],
+          ["Remaining", `${daysUntil(active.endsAt)} day(s)`],
+        ];
+        upcoming.forEach((next) =>
+          notes.push(`Renewed: your next ${next.plan?.name || ""} period runs ${formatDate(next.startsAt)} → ${formatDate(next.endsAt)}.`));
+        if (!renewal.allowed && renewal.renewableFrom) {
+          notes.push(`No action needed. Renewal opens on ${formatDate(renewal.renewableFrom)}.`);
         }
-        const plans = body.data.plans || [];
-        if (plans.length === 0) {
-          plansBox.replaceChildren(el("p", { className: "muted", textContent: "No plans available right now." }));
-          return;
-        }
-        const cards = plans.map(planCard);
-        plansBox.replaceChildren(...cards);
-        selectPlan(plans[0], cards[0]);
-      } catch (error) {
-        console.error("Plans error:", error);
-        plansBox.replaceChildren(el("p", { className: "muted", textContent: "Could not load plans." }));
-        showStatus(`Could not load plans.\n\n${error.message}`, "error");
+      } else if (status === "EXPIRED" || status === "CANCELLED") {
+        title = "Previous plan";
+        badge = [status === "CANCELLED" ? "Cancelled" : "Expired", "expired"];
+        facts = [...planFacts(latest), ["Expired on", formatDate(latest.endsAt)]];
+        notes.push(renewal.planCode
+          ? "Renew to restore land verification and monitoring."
+          : "Your previous plan is no longer offered. Choose a plan below.");
+      } else if (status === "PENDING") {
+        title = "Payment pending";
+        badge = ["Pending", "pending"];
+        facts = planFacts(pending);
+        notes.push("Access starts once the payment is confirmed.");
+      }
+
+      if (!title) {
+        currentBox.hidden = true;
+        return;
+      }
+      const head = el("div", { className: "current-head" }, [
+        el("h2", { textContent: title }),
+        el("span", { className: `badge ${badge[1]}`, textContent: badge[0] }),
+      ]);
+      const list = el("dl", { className: "facts" }, facts.flatMap(([k, v]) => [el("dt", { textContent: k }), el("dd", { textContent: v })]));
+      const children = [head, list, ...notes.map((text) => el("p", { className: "note", textContent: text }))];
+
+      if (mode() === "renew" && renewal.planCode && !showPicker && plans.length > 1) {
+        const change = el("button", { type: "button", className: "link", textContent: "Change plan" });
+        change.addEventListener("click", () => { showPicker = true; render(); });
+        children.push(change);
+      }
+      currentBox.replaceChildren(...children);
+      currentBox.hidden = false;
+    }
+
+
+    // =========================================================
+    // ACTION BUTTON + PLAN PICKER VISIBILITY
+    // =========================================================
+
+    // The plan used for Renew when the picker is closed: the last paid plan.
+    const renewPlan = () => plans.find((p) => p.code === subscription?.renewal?.planCode) || null;
+
+    function renderAction() {
+      const m = mode();
+      const pickerVisible = m === "buy" || m === "pending" || (m === "renew" && (showPicker || !renewPlan()));
+      plansBox.hidden = !pickerVisible;
+      payButton.hidden = m === "none";
+
+      let plan = pickerVisible ? selectedPlan : renewPlan();
+      if (m === "pending" && !plan) plan = plans.find((p) => p.code === subscription.pending.plan?.code) || null;
+
+      payButton.disabled = busy || !plan || m === "loading";
+      if (m === "loading") payButton.textContent = "Loading…";
+      else if (!plan) payButton.textContent = "Select a plan";
+      else if (m === "renew") payButton.textContent = `Renew ${plan.name} · ${formatPrice(plan)}`;
+      else if (m === "pending") payButton.textContent = `Complete payment · ${formatPrice(plan)}`;
+      else payButton.textContent = `Pay ${formatPrice(plan)}`;
+    }
+
+    function render() {
+      renderCurrent();
+      // Preselect: pending plan, else last paid plan, else the first plan.
+      if (!selectedPlan && plans.length) {
+        const preferred = subscription?.pending?.plan?.code || subscription?.renewal?.planCode;
+        const plan = plans.find((p) => p.code === preferred) || plans[0];
+        selectPlan(plan);
+      } else {
+        if (selectedPlan) selectPlan(selectedPlan);
+        renderAction();
       }
     }
 
-    loadPlans();
+    async function loadSubscription() {
+      subscription = await api("GET", "/api/v1/subscriptions/current");
+      render();
+    }
+
+
+    // =========================================================
+    // PAYMENT FLOW
+    // =========================================================
+
+    // Renew uses POST /subscriptions/renew (same plan by default, planCode to change);
+    // a first purchase or pending payment uses POST /subscriptions/create, which reuses
+    // the unpaid subscription. The backend decides whether buying is allowed at all.
+    async function startPayment() {
+      const m = mode();
+      const plan = plansBox.hidden ? renewPlan() : selectedPlan;
+      if (!plan) {
+        showStatus("Please select a plan first.", "error");
+        return;
+      }
+
+      busy = true;
+      renderAction();
+      try {
+        showStatus(m === "renew" ? `Renewing ${plan.name}...` : `Creating ${plan.name} subscription...`);
+        const created = m === "renew"
+          ? await api("POST", "/api/v1/subscriptions/renew", plansBox.hidden ? {} : { planCode: plan.code })
+          : await api("POST", "/api/v1/subscriptions/create", { planCode: plan.code });
+        const subscriptionId = created.subscription.id;
+
+        showStatus("Creating Razorpay order...");
+        const { checkout } = await api("POST", "/api/v1/payments/create", { subscriptionId });
+
+        openCheckout(checkout, subscriptionId);
+      } catch (error) {
+        console.error("Payment flow error:", error);
+        showStatus(`Error:\n\n${error.message}`, "error");
+        busy = false;
+        // e.g. SUBSCRIPTION_ALREADY_ACTIVE: another tab already paid. Show the truth.
+        await loadSubscription().catch(() => renderAction());
+      }
+    }
+
+    function openCheckout(checkout, subscriptionId) {
+      const razorpay = new Razorpay({
+        key: checkout.keyId,
+        amount: checkout.amount,
+        currency: checkout.currency,
+        name: checkout.name,
+        description: checkout.description,
+        order_id: checkout.orderId,
+
+        // Used when Checkout leaves the page (bank / 3-D Secure, blocked popup, mobile):
+        // Razorpay posts the result to the API, which verifies it and returns here.
+        callback_url: `${API_BASE}/api/v1/payments/callback`,
+
+        handler: async (response) => {
+          showStatus(`Payment received.\n\nPayment ID: ${response.razorpay_payment_id}\n\nVerifying payment...`);
+          try {
+            // The backend verifies the signature and asks Razorpay; the popup alone proves nothing.
+            const result = await api("POST", "/api/v1/payments/verify", {
+              razorpay_order_id: response.razorpay_order_id,
+              razorpay_payment_id: response.razorpay_payment_id,
+              razorpay_signature: response.razorpay_signature,
+            });
+            showStatus(
+              `🎉 PAYMENT VERIFIED SUCCESSFULLY!\n\n` +
+              `Plan: ${result.subscription.plan?.name || "-"}\n` +
+              `Valid: ${formatDate(result.subscription.startsAt)} → ${formatDate(result.subscription.endsAt)}\n` +
+              `Payment ID: ${response.razorpay_payment_id}`,
+              "success",
+            );
+          } catch (error) {
+            console.error("Verification error:", error);
+            showStatus(`Payment completed but verification failed.\n\n${error.message}\n\nIf money was taken, your plan activates once Razorpay confirms it.`, "error");
+          } finally {
+            busy = false;
+            showPicker = false;
+            await loadSubscription().catch(() => renderAction());
+          }
+        },
+
+        modal: {
+          ondismiss: () => {
+            showStatus("Razorpay Checkout closed.", "error");
+            busy = false;
+            renderAction();
+          },
+        },
+
+        theme: { color: "#111827" },
+      });
+
+      razorpay.on("payment.failed", (response) => {
+        console.error("Payment failed:", response.error);
+        showStatus(
+          `Payment failed.\n\nCode: ${response.error.code}\nDescription: ${response.error.description}\n\nReason: ${response.error.reason}`,
+          "error",
+        );
+        busy = false;
+        renderAction();
+      });
+
+      showStatus(`Razorpay order created.\n\nOrder ID: ${checkout.orderId}\nAmount: ₹${checkout.amount / 100}\n\nOpening Razorpay Checkout...`);
+      razorpay.open();
+    }
+
+    payButton.addEventListener("click", () => {
+      if (!busy) startPayment();
+    });
 
 
     // =========================================================
@@ -281,7 +600,7 @@
       const result = params.get("status");
       if (!result) return;
       const messages = {
-        success: [`🎉 PAYMENT VERIFIED SUCCESSFULLY!\n\nPayment ID: ${params.get("paymentId") || "-"}\nSubscription: ${params.get("subscriptionId") || "-"}`, "success"],
+        success: [`🎉 PAYMENT VERIFIED SUCCESSFULLY!\n\nPayment ID: ${params.get("paymentId") || "-"}`, "success"],
         pending: [`Payment received, confirmation pending.\n\nPayment ID: ${params.get("paymentId") || "-"}\nYour subscription activates as soon as Razorpay confirms it.`, ""],
         failed: [`Payment failed.\n\n${params.get("reason") || ""}`, "error"],
       };
@@ -293,368 +612,31 @@
 
 
     // =========================================================
-    // MAIN PAYMENT FLOW
+    // START
     // =========================================================
 
-    payButton.addEventListener("click", async () => {
-
-      if (!selectedPlan) {
-        showStatus("Please select a plan first.", "error");
-        return;
-      }
-
+    (async function start() {
       try {
-
-        payButton.disabled = true;
-
-        showStatus(`Creating ${selectedPlan.name} subscription...`);
-
-
-        // -----------------------------------------------------
-        // 1. CREATE SUBSCRIPTION
-        // -----------------------------------------------------
-
-        const subscriptionResponse = await fetch(
-          `${API_BASE}/api/v1/subscriptions/create`,
-          {
-            method: "POST",
-
-            headers: {
-              "Content-Type": "application/json",
-              "Authorization": `Bearer ${TOKEN}`
-            },
-
-            body: JSON.stringify({
-              planCode: selectedPlan.code
-            })
-          }
-        );
-
-
-        const subscriptionData =
-          await subscriptionResponse.json();
-
-
-        console.log(
-          "Subscription response:",
-          subscriptionData
-        );
-
-
-        if (!subscriptionResponse.ok ||
-            !subscriptionData.success) {
-
-          throw new Error(
-            subscriptionData?.error?.message ||
-            subscriptionData?.message ||
-            "Failed to create subscription"
-          );
-        }
-
-
-        const subscription =
-          subscriptionData.data.subscription;
-
-
-        const subscriptionId =
-          subscription.id;
-
-
-        showStatus(
-          `Subscription created.\n\n` +
-          `Subscription ID: ${subscriptionId}\n` +
-          `Status: ${subscription.status}\n\n` +
-          `Creating Razorpay order...`
-        );
-
-
-        // -----------------------------------------------------
-        // 2. CREATE RAZORPAY ORDER
-        // -----------------------------------------------------
-
-        const paymentResponse = await fetch(
-          `${API_BASE}/api/v1/payments/create`,
-          {
-            method: "POST",
-
-            headers: {
-              "Content-Type": "application/json",
-              "Authorization": `Bearer ${TOKEN}`
-            },
-
-            body: JSON.stringify({
-              subscriptionId: subscriptionId
-            })
-          }
-        );
-
-
-        const paymentData =
-          await paymentResponse.json();
-
-
-        console.log(
-          "Payment create response:",
-          paymentData
-        );
-
-
-        if (!paymentResponse.ok ||
-            !paymentData.success) {
-
-          throw new Error(
-            paymentData?.error?.message ||
-            paymentData?.message ||
-            "Failed to create Razorpay order"
-          );
-        }
-
-
-        const payment =
-          paymentData.data.payment;
-
-        const checkout =
-          paymentData.data.checkout;
-
-
-        showStatus(
-          `Razorpay order created.\n\n` +
-          `Order ID: ${checkout.orderId}\n` +
-          `Amount: ₹${checkout.amount / 100}\n\n` +
-          `Opening Razorpay Checkout...`
-        );
-
-
-        // -----------------------------------------------------
-        // 3. OPEN RAZORPAY CHECKOUT
-        // -----------------------------------------------------
-
-        const options = {
-
-          key: checkout.keyId,
-
-          amount: checkout.amount,
-
-          currency: checkout.currency,
-
-          name: checkout.name,
-
-          description: checkout.description,
-
-          order_id: checkout.orderId,
-
-          // Used when Checkout leaves the page (bank / 3-D Secure, blocked popup, mobile):
-          // Razorpay posts the result to the API, which verifies it and returns here.
-          callback_url: `${API_BASE}/api/v1/payments/callback`,
-
-
-          // ---------------------------------------------------
-          // PAYMENT SUCCESS
-          // ---------------------------------------------------
-
-          handler: async function (response) {
-
-            console.log(
-              "Razorpay payment response:",
-              response
-            );
-
-
-            showStatus(
-              `Payment successful!\n\n` +
-              `Payment ID: ${response.razorpay_payment_id}\n` +
-              `Order ID: ${response.razorpay_order_id}\n\n` +
-              `Verifying payment...`
-            );
-
-
-            try {
-
-              // -----------------------------------------------
-              // 4. VERIFY PAYMENT
-              // -----------------------------------------------
-
-              const verifyResponse = await fetch(
-                `${API_BASE}/api/v1/payments/verify`,
-                {
-                  method: "POST",
-
-                  headers: {
-                    "Content-Type": "application/json",
-                    "Authorization": `Bearer ${TOKEN}`
-                  },
-
-                  body: JSON.stringify({
-
-                    razorpay_order_id:
-                      response.razorpay_order_id,
-
-                    razorpay_payment_id:
-                      response.razorpay_payment_id,
-
-                    razorpay_signature:
-                      response.razorpay_signature
-
-                  })
-                }
-              );
-
-
-              const verifyData =
-                await verifyResponse.json();
-
-
-              console.log(
-                "Verify response:",
-                verifyData
-              );
-
-
-              if (!verifyResponse.ok ||
-                  !verifyData.success) {
-
-                throw new Error(
-                  verifyData?.error?.message ||
-                  verifyData?.message ||
-                  "Payment verification failed"
-                );
-              }
-
-
-              // -----------------------------------------------
-              // SUCCESS
-              // -----------------------------------------------
-
-              showStatus(
-
-                `🎉 PAYMENT VERIFIED SUCCESSFULLY!\n\n` +
-
-                `Payment ID:\n` +
-                `${response.razorpay_payment_id}\n\n` +
-
-                `Order ID:\n` +
-                `${response.razorpay_order_id}\n\n` +
-
-                `Subscription:\n` +
-                `${subscriptionId}\n\n` +
-
-                `Response:\n` +
-                `${JSON.stringify(
-                  verifyData,
-                  null,
-                  2
-                )}`,
-
-                "success"
-              );
-
-
-              payButton.disabled = false;
-
-            } catch (error) {
-
-              console.error(
-                "Verification error:",
-                error
-              );
-
-              showStatus(
-                `Payment completed but verification failed.\n\n` +
-                `${error.message}`,
-                "error"
-              );
-
-              payButton.disabled = false;
-            }
-          },
-
-
-          // ---------------------------------------------------
-          // PAYMENT MODAL CLOSED
-          // ---------------------------------------------------
-
-          modal: {
-
-            ondismiss: function () {
-
-              showStatus(
-                "Razorpay Checkout closed.",
-                "error"
-              );
-
-              payButton.disabled = false;
-
-            }
-
-          },
-
-
-          theme: {
-            color: "#111827"
-          }
-
-        };
-
-
-        // Create Razorpay instance
-
-        const razorpay =
-          new Razorpay(options);
-
-
-        // Handle Razorpay errors
-
-        razorpay.on(
-          "payment.failed",
-          function (response) {
-
-            console.error(
-              "Payment failed:",
-              response.error
-            );
-
-            showStatus(
-
-              `Payment failed.\n\n` +
-
-              `Code: ${response.error.code}\n` +
-
-              `Description: ${response.error.description}\n\n` +
-
-              `Reason: ${response.error.reason}`,
-
-              "error"
-
-            );
-
-            payButton.disabled = false;
-
-          }
-        );
-
-
-        // Open Checkout
-
-        razorpay.open();
-
-
+        await loadPlans();
       } catch (error) {
-
-        console.error(
-          "Payment flow error:",
-          error
-        );
-
-        showStatus(
-          `Error:\n\n${error.message}`,
-          "error"
-        );
-
-        payButton.disabled = false;
-
+        console.error("Plans error:", error);
+        plansBox.replaceChildren(el("p", { className: "muted", textContent: "Could not load plans." }));
+        showStatus(`Could not load plans.\n\n${error.message}`, "error");
       }
-
-    });
+      try {
+        await loadSubscription();
+      } catch (error) {
+        console.error("Subscription status error:", error);
+        if (error.status === 401) {
+          try { sessionStorage.removeItem("bhoomiscanToken"); } catch {}
+          showStatus("Your login has expired. Please log in again.", "error");
+          payButton.disabled = true;
+          payButton.textContent = "Log in to continue";
+          return;
+        }
+        showStatus(`Could not load your subscription.\n\n${error.message}`, "error");
+      }
+    })();
 
   </script>
 

@@ -140,6 +140,8 @@ model User {
   landVerifications LandVerification[]
   alerts            Alert[]
   apiRequestLogs    ApiRequestLog[]
+  deviceTokens      DeviceToken[]
+  notifications     Notification[]
 
   @@map("users")
 }
@@ -425,4 +427,66 @@ model ApiRequestLog {
   @@index([provider, createdAt])
   @@index([userId, createdAt])
   @@map("api_request_logs")
+}
+
+/* ------------------------------------------------------------------ */
+/* Push notifications (Firebase Cloud Messaging)                      */
+/* ------------------------------------------------------------------ */
+
+enum DevicePlatform {
+  ANDROID
+  IOS
+  WEB
+}
+
+enum NotificationStatus {
+  PENDING // waiting to be sent (or retried at next_attempt_at)
+  SENT // delivered to FCM for at least one device
+  FAILED // retries exhausted
+  SKIPPED // nothing to send to (push not configured / no registered devices)
+}
+
+// One row per app install. A token moves to whoever registered it last.
+model DeviceToken {
+  id         String         @id @default(uuid()) @db.Uuid
+  userId     String         @map("user_id") @db.Uuid
+  token      String         @unique
+  platform   DevicePlatform
+  lastSeenAt DateTime       @default(now()) @map("last_seen_at")
+  createdAt  DateTime       @default(now()) @map("created_at")
+  updatedAt  DateTime       @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@map("device_tokens")
+}
+
+// Outbox: written in the same transaction as the event (e.g. a new snapshot),
+// sent afterwards by the push job, so a notification is never lost or sent for
+// something that was rolled back. Also the user's notification inbox.
+model Notification {
+  id                 String             @id @default(uuid()) @db.Uuid
+  userId             String             @map("user_id") @db.Uuid
+  type               String // LAND_VERIFIED | LAND_UNCHANGED | LAND_CHANGED
+  title              String
+  body               String
+  data               Json? // small, string-valued payload also sent to the device
+  landVerificationId String?            @map("land_verification_id") @db.Uuid
+  snapshotId         String?            @map("snapshot_id") @db.Uuid
+  status             NotificationStatus @default(PENDING)
+  attempts           Int                @default(0)
+  nextAttemptAt      DateTime           @default(now()) @map("next_attempt_at")
+  lockedUntil        DateTime?          @map("locked_until")
+  sentAt             DateTime?          @map("sent_at")
+  deliveredCount     Int                @default(0) @map("delivered_count")
+  lastError          String?            @map("last_error")
+  createdAt          DateTime           @default(now()) @map("created_at")
+  updatedAt          DateTime           @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([status, nextAttemptAt])
+  @@index([userId, createdAt])
+  @@map("notifications")
 }

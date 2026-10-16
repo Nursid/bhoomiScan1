@@ -10,11 +10,13 @@ const logger = require('../utils/logger');
 const recurringVerification = require('./recurring-verification.job');
 const smartContractService = require('../modules/smart-contract/smart-contract.service');
 const subscriptionsService = require('../modules/subscriptions/subscriptions.service');
+const notificationsService = require('../modules/notifications/notifications.service');
 
 const JOBS = [
   { name: 'subscription-expiry', everySeconds: () => config.jobs.subscriptionExpiryIntervalSeconds, run: () => subscriptionsService.expireDueSubscriptions() },
   { name: 'smart-contract-retry', everySeconds: () => config.jobs.smartContractRetryIntervalSeconds, run: () => smartContractService.processDueRecords() },
   { name: 'recurring-verification', everySeconds: () => config.jobs.recurringVerificationIntervalSeconds, run: () => recurringVerification.run() },
+  { name: 'push-notifications', everySeconds: () => config.jobs.pushNotificationsIntervalSeconds, run: () => notificationsService.processDue() },
 ];
 
 const timers = [];

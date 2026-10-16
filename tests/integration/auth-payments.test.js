@@ -161,6 +161,12 @@ describe('plans, subscriptions and payments', () => {
   let quarterlyOrderId;
   let quarterlySubscriptionId;
   test('amount mismatch reported by Razorpay is rejected', async () => {
+    // Buying again is only possible inside the renewal window: move the paid month there.
+    const monthly = await prisma.subscription.findFirst({ where: { userId, status: 'ACTIVE' } });
+    await prisma.subscription.update({
+      where: { id: monthly.id },
+      data: { startsAt: new Date(Date.now() - 20 * 86400000), endsAt: new Date(Date.now() + 10 * 86400000) },
+    });
     const sub = await app.post('/api/v1/subscriptions/create').set(auth).send({ planCode: 'quarterly' });
     quarterlySubscriptionId = sub.body.data.subscription.id;
     const pay = await app.post('/api/v1/payments/create').set(auth).send({ subscriptionId: quarterlySubscriptionId });

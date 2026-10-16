@@ -105,4 +105,4 @@ const verifyIdToken = async (idToken) => {
   };
 };
 
-module.exports = { verifyIdToken, isConfigured, FirebaseAuthError, __testing: { toFirebaseAuthError, getFirebaseApp, APP_NAME } };
+module.exports = { verifyIdToken, isConfigured, getFirebaseApp, FirebaseAuthError, __testing: { toFirebaseAuthError, getFirebaseApp, APP_NAME } };

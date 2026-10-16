@@ -78,6 +78,9 @@ const schema = z.object({
   // Also reject revoked ID tokens / disabled Firebase users (needs credentials).
   // Defaults to on whenever credentials are available.
   FIREBASE_CHECK_REVOKED: str(''),
+  // Push notifications via Firebase Cloud Messaging (needs the Firebase credentials above).
+  PUSH_NOTIFICATIONS_ENABLED: bool(true),
+  PUSH_MAX_ATTEMPTS: int(5, { min: 1 }),
 
   MOBILE_DEFAULT_COUNTRY_CODE: str('91'),
   MSG91_WIDGET_ID: str(''),
@@ -92,6 +95,10 @@ const schema = z.object({
   RAZORPAY_KEY_SECRET: str(''),
   RAZORPAY_WEBHOOK_SECRET: str(''),
   RAZORPAY_TIMEOUT_MS: int(20000, { min: 1000 }),
+  // Renewal opens this many days before the current plan ends (manual renewal).
+  SUBSCRIPTION_RENEWAL_WINDOW_DAYS: int(30, { min: 0 }),
+  // An unpaid Razorpay order is handed out again (instead of a new one) for this long.
+  PAYMENT_ORDER_REUSE_MINUTES: int(30, { min: 0 }),
 
   SUREPASS_BASE_URL: url('https://sandbox.surepass.io'),
   SUREPASS_TOKEN: str(''),
@@ -121,6 +128,7 @@ const schema = z.object({
   JOB_RECURRING_VERIFICATION_INTERVAL_SECONDS: int(300, { min: 5 }),
   JOB_SMART_CONTRACT_RETRY_INTERVAL_SECONDS: int(60, { min: 5 }),
   JOB_SUBSCRIPTION_EXPIRY_INTERVAL_SECONDS: int(300, { min: 5 }),
+  JOB_PUSH_NOTIFICATIONS_INTERVAL_SECONDS: int(15, { min: 5 }),
   JOB_BATCH_SIZE: int(20, { min: 1 }),
 
   RATE_LIMIT_WINDOW_SECONDS: int(60, { min: 1 }),
@@ -167,7 +175,7 @@ const firebase = (() => {
   if (checkRevoked && !hasCredentials) {
     throw new Error('FIREBASE_CHECK_REVOKED=true needs FIREBASE_SERVICE_ACCOUNT_JSON or GOOGLE_APPLICATION_CREDENTIALS');
   }
-  return { projectId: env.FIREBASE_PROJECT_ID, serviceAccount, checkRevoked };
+  return { projectId: env.FIREBASE_PROJECT_ID, serviceAccount, checkRevoked, hasCredentials };
 })();
 
 const trustProxy = (() => {
@@ -204,6 +212,13 @@ const config = {
 
   firebase,
 
+  push: {
+    // FCM needs a credential (service account or ADC); a project id alone is not enough.
+    enabled: env.PUSH_NOTIFICATIONS_ENABLED && Boolean(env.FIREBASE_PROJECT_ID) && firebase.hasCredentials,
+    requested: env.PUSH_NOTIFICATIONS_ENABLED,
+    maxAttempts: env.PUSH_MAX_ATTEMPTS,
+  },
+
   otp: {
     defaultCountryCode: env.MOBILE_DEFAULT_COUNTRY_CODE.replace(/\D/g, '') || '91',
   },
@@ -223,6 +238,11 @@ const config = {
     keySecret: env.RAZORPAY_KEY_SECRET,
     webhookSecret: env.RAZORPAY_WEBHOOK_SECRET,
     timeoutMs: env.RAZORPAY_TIMEOUT_MS,
+    orderReuseMinutes: env.PAYMENT_ORDER_REUSE_MINUTES,
+  },
+
+  subscriptions: {
+    renewalWindowDays: env.SUBSCRIPTION_RENEWAL_WINDOW_DAYS,
   },
 
   surepass: {
@@ -260,6 +280,7 @@ const config = {
     recurringVerificationIntervalSeconds: env.JOB_RECURRING_VERIFICATION_INTERVAL_SECONDS,
     smartContractRetryIntervalSeconds: env.JOB_SMART_CONTRACT_RETRY_INTERVAL_SECONDS,
     subscriptionExpiryIntervalSeconds: env.JOB_SUBSCRIPTION_EXPIRY_INTERVAL_SECONDS,
+    pushNotificationsIntervalSeconds: env.JOB_PUSH_NOTIFICATIONS_INTERVAL_SECONDS,
     batchSize: env.JOB_BATCH_SIZE,
   },
 

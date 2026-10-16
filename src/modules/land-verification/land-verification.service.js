@@ -24,6 +24,8 @@ const { nextVerificationDate, failureRetryDate } = require('./verification-sched
 const registry = require('./providers/registry');
 const smartContractService = require('../smart-contract/smart-contract.service');
 const alertsService = require('../alerts/alerts.service');
+const notificationsService = require('../notifications/notifications.service');
+const { describeField } = require('./land-record-labels');
 
 const SCHEDULED_FAILURE_ALERT_THRESHOLD = 3;
 const MAX_ALERT_FIELDS = 20;
@@ -255,6 +257,29 @@ const verify = async ({ userId, adapter, locator, trigger = 'MANUAL' }) => {
         );
       }
 
+      // Push for every completed verification (good news included), committed with the snapshot.
+      const summary = summarize(changes);
+      const message = notificationsService.landVerificationMessage({
+        snapshotStatus,
+        displayName: current.displayName,
+        summary,
+        previousVerifiedAt: previous?.verifiedAt || null,
+      });
+      const notification = await notificationsService.enqueue(tx, {
+        userId,
+        ...message,
+        landVerificationId: verification.id,
+        snapshotId: snapshot.id,
+        data: {
+          screen: 'LAND_COMPARISON',
+          verificationId: verification.id,
+          snapshotId: snapshot.id,
+          status: snapshotStatus,
+          changes: summary.total,
+          critical: summary.critical,
+        },
+      });
+
       const updated = await tx.landVerification.update({
         where: { id: verification.id },
         data: {
@@ -275,12 +300,13 @@ const verify = async ({ userId, adapter, locator, trigger = 'MANUAL' }) => {
         },
       });
 
-      return { verification: updated, previous, snapshot, changes, smartContractRecord, alert };
+      return { verification: updated, previous, snapshot, changes, smartContractRecord, alert, notification };
     },
     { timeout: 20000 },
   );
 
   if (outcome.alert) alertsService.notify(outcome.alert);
+  notificationsService.sendSoon(outcome.notification.id);
   logger.info(
     { verificationId: verification.id, snapshotId: outcome.snapshot.id, status: outcome.snapshot.status, changes: outcome.changes.length, trigger },
     'land record verified',
@@ -324,6 +350,7 @@ const verify = async ({ userId, adapter, locator, trigger = 'MANUAL' }) => {
       transactionHash: smartContract.transactionHash || null,
     },
     alertId: outcome.alert?.id || null,
+    notificationId: outcome.notification.id,
   };
 };
 
@@ -386,6 +413,71 @@ const getChanges = async (userId, id, { skip, limit, snapshotId, criticalOnly })
   return { changes: items.map(publicChange), total };
 };
 
+/**
+ * One verification result laid out for a mobile screen: a headline (same text as
+ * the push), the previous record (`old`), the new record (`new`) and the list of
+ * differences with readable labels, critical ones first.
+ *
+ * `old` is the previous snapshot normalized with the adapter's rules, exactly as
+ * verify compared it, so old / new / changes always agree.
+ */
+const getComparison = async (userId, id, { snapshotId } = {}) => {
+  const verification = await findOwned(userId, id);
+  const current = await prisma.landRecordSnapshot.findFirst({
+    where: { landVerificationId: id, ...(snapshotId ? { id: snapshotId } : {}) },
+    orderBy: { sequence: 'desc' },
+  });
+  if (!current) throw notFound('Snapshot not found', 'SNAPSHOT_NOT_FOUND');
+
+  const [previous, changeRows] = await Promise.all([
+    current.previousSnapshotId ? prisma.landRecordSnapshot.findUnique({ where: { id: current.previousSnapshotId } }) : null,
+    prisma.landRecordChange.findMany({ where: { snapshotId: current.id } }),
+  ]);
+
+  let oldRecord = previous?.normalizedData ?? null;
+  if (previous) {
+    try {
+      oldRecord = registry.getAdapterByStateCode(verification.stateCode).normalizeRecord(previous.rawResponse);
+    } catch (error) {
+      logger.warn({ verificationId: id, err: error.message }, 'comparison: re-normalizing previous snapshot failed; using stored data');
+    }
+  }
+
+  const summary = summarize(changeRows);
+  const message = notificationsService.landVerificationMessage({
+    snapshotStatus: current.status,
+    displayName: verification.displayName,
+    summary,
+    previousVerifiedAt: previous?.verifiedAt || null,
+  });
+  const changes = changeRows
+    .map((change) => ({
+      field: change.field,
+      ...describeField(change.field),
+      type: change.type,
+      oldValue: change.oldValue ?? null,
+      newValue: change.newValue ?? null,
+      isCritical: change.isCritical,
+    }))
+    .sort((a, b) => Number(b.isCritical) - Number(a.isCritical) || a.field.localeCompare(b.field));
+
+  return {
+    verificationId: verification.id,
+    land: { displayName: verification.displayName, state: verification.stateCode, locator: verification.locator },
+    snapshotId: current.id,
+    sequence: current.sequence,
+    status: current.status,
+    hasChanges: changes.length > 0,
+    headline: { title: message.title, body: message.body },
+    verifiedAt: current.verifiedAt,
+    previousVerifiedAt: previous?.verifiedAt || null,
+    summary,
+    old: previous ? { snapshotId: previous.id, verifiedAt: previous.verifiedAt, record: oldRecord } : null,
+    new: { snapshotId: current.id, verifiedAt: current.verifiedAt, record: current.normalizedData },
+    changes,
+  };
+};
+
 /* ------------------------------- Monitoring ------------------------------- */
 
 /**
@@ -435,6 +527,7 @@ module.exports = {
   getHistory,
   getSnapshot,
   getChanges,
+  getComparison,
   configureMonitoring,
   publicVerification,
   __testing: { parcelKeyFor, recordFailure },
