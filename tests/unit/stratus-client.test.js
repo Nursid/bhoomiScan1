@@ -102,6 +102,30 @@ describe('Zoho Catalyst Stratus REST client', () => {
       .rejects.toMatchObject({ code: 'STRATUS_UPLOAD_FAILED' });
   });
 
+  test('stops after one OAuth refresh if upload remains unauthorized', async () => {
+    global.fetch.mockResolvedValueOnce(tokenResponse('first-token'))
+      .mockResolvedValueOnce(new Response(null, { status: 401 }))
+      .mockResolvedValueOnce(tokenResponse('second-token'))
+      .mockResolvedValueOnce(new Response(null, { status: 401 }));
+    await expect(stratus.upload({ key: 'documents/user/doc-id', bytes: Buffer.from('x'), contentType: 'image/png' }))
+      .rejects.toMatchObject({ code: 'STRATUS_UPLOAD_FAILED' });
+    expect(global.fetch).toHaveBeenCalledTimes(4);
+  });
+
+  test('rejects an advertised oversized download before consuming its bytes', async () => {
+    global.fetch.mockResolvedValueOnce(tokenResponse()).mockResolvedValueOnce(new Response('x', {
+      status: 200, headers: { 'content-length': String(10 * 1024 * 1024 + 1) },
+    }));
+    await expect(stratus.download({ key: 'documents/user/doc-id', expectedSize: 1 }))
+      .rejects.toMatchObject({ code: 'STRATUS_FILE_TOO_LARGE' });
+  });
+
+  test('rejects streamed bytes exceeding the recorded size even without content-length', async () => {
+    global.fetch.mockResolvedValueOnce(tokenResponse()).mockResolvedValueOnce(new Response(Buffer.from('longer'), { status: 200 }));
+    await expect(stratus.download({ key: 'documents/user/doc-id', expectedSize: 2 }))
+      .rejects.toMatchObject({ code: 'STRATUS_FILE_SIZE_MISMATCH' });
+  });
+
   test('uses only the unique attempted object key for delayed Stratus cleanup', async () => {
     global.fetch.mockResolvedValueOnce(tokenResponse()).mockResolvedValueOnce(new Response(null, { status: 200 }));
     const generatedObjectKey = 'verification-tests/attempt-id.txt';

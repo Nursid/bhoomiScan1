@@ -51,7 +51,7 @@ const createApp = () => {
           callback(null, allowed);
         },
         methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
-        allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-Id'],
+        allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-Id', 'X-File-Name'],
         exposedHeaders: ['X-Request-Id', 'Retry-After'],
         maxAge: 600,
       }),

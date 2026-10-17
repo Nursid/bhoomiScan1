@@ -9,8 +9,17 @@ const { addSeconds } = require('../../utils/dates');
 const LEASE_SECONDS = 180;
 const BASE_BACKOFF_SECONDS = 30;
 const MAX_BACKOFF_SECONDS = 6 * 60 * 60;
+// Retain known results during a database outage so this process retries only
+// persistence. Once the hash checkpoint is saved, recovery also survives restart.
+const pendingReceipts = new Map();
 const hashFile = (bytes) => `0x${createHash('sha256').update(bytes).digest('hex')}`;
 const backoffSeconds = (attempts) => Math.min(BASE_BACKOFF_SECONDS * 2 ** Math.max(attempts - 1, 0), MAX_BACKOFF_SECONDS);
+
+const assertDuplicateSeries = (document, lineage) => {
+  if (lineage.documentSeriesId && document.documentSeriesId !== lineage.documentSeriesId) {
+    throw conflict('These file bytes already belong to a different document series', undefined, 'DOCUMENT_VERSION_CONFLICT');
+  }
+};
 
 const toPublic = (document) => ({
   id: document.id,
@@ -65,6 +74,43 @@ const markStored = async (document, result, status = 'STORED') => prisma.uploade
   },
 });
 
+const persistReceipt = async (document, result, status = 'STORED') => {
+  pendingReceipts.set(document.id, { result, status });
+  const transactionHash = result.transactionHash || document.transactionHash || null;
+  const chainId = result.chainId ?? document.chainId ?? null;
+  try {
+    const stored = await markStored(document, result, status);
+    pendingReceipts.delete(document.id);
+    return stored;
+  } catch {
+    // The final write may have committed even if its response was lost.
+    const stored = await prisma.uploadedDocument.findUnique({ where: { id: document.id } }).catch(() => null);
+    if (stored?.status === status && stored.dataHash === document.dataHash
+      && stored.transactionHash === transactionHash && stored.chainId === chainId) {
+      pendingReceipts.delete(document.id);
+      return stored;
+    }
+    try {
+      // Never classify an already-successful chain call as a failed registration.
+      return await prisma.uploadedDocument.update({
+        where: { id: document.id },
+        data: {
+          status: 'PENDING', transactionHash, chainId,
+          network: result.network || document.network || 'bsc-testnet',
+          contractAddress: result.contractAddress || document.contractAddress || config.smartContract.bsc.contractAddress,
+          errorCode: 'DOCUMENT_RECEIPT_PERSIST_FAILED',
+          nextRetryAt: addSeconds(new Date(), backoffSeconds(document.attempts)), lockedUntil: null,
+        },
+      });
+    } catch {
+      // Keep the receipt in memory even when the checkpoint cannot be saved.
+      throw new ProviderError(503, 'DOCUMENT_RECEIPT_PERSIST_FAILED', 'Registration succeeded; receipt persistence will be retried', {
+        provider: 'SMART_CONTRACT', retryable: true, meta: { transactionHash, chainId },
+      });
+    }
+  }
+};
+
 const processDocument = async (documentId) => {
   const now = new Date();
   const claimResult = await prisma.uploadedDocument.updateMany({
@@ -77,20 +123,26 @@ const processDocument = async (documentId) => {
     },
     data: { status: 'PROCESSING', lockedUntil: addSeconds(now, LEASE_SECONDS), lastAttemptAt: now, attempts: { increment: 1 } },
   });
-  if (claimResult.count !== 1) return prisma.uploadedDocument.findUnique({ where: { id: documentId } });
+  if (claimResult.count !== 1) {
+    const existing = await prisma.uploadedDocument.findUnique({ where: { id: documentId } });
+    if (existing && ['STORED', 'ALREADY_STORED', 'REVOKED'].includes(existing.status)) pendingReceipts.delete(documentId);
+    return existing;
+  }
 
   const document = await prisma.uploadedDocument.findUnique({ where: { id: documentId } });
+  const pendingReceipt = pendingReceipts.get(documentId);
+  if (pendingReceipt) return persistReceipt(document, pendingReceipt.result, pendingReceipt.status);
   const provider = getSmartContractProvider();
   try {
     assertTestnetProvider(provider, { write: true });
     const result = await provider.store({ dataHash: document.dataHash, transactionHash: document.transactionHash || undefined });
-    return markStored(document, result);
+    return persistReceipt(document, result);
   } catch (error) {
     if (error?.code === 'SMART_CONTRACT_DUPLICATE' && typeof provider.verify === 'function') {
       try {
         const verified = await provider.verify({ dataHash: document.dataHash });
         if (verified.exists) {
-          return markStored(document, {
+          return persistReceipt(document, {
             network: verified.network,
             chainId: verified.chainId,
             contractAddress: verified.contractAddress,
@@ -124,7 +176,10 @@ const processDocument = async (documentId) => {
 const registerDocument = async (userId, { bytes, fileName, contentType }, lineage = {}) => {
   const dataHash = hashFile(bytes);
   let document = await prisma.uploadedDocument.findUnique({ where: { userId_dataHash: { userId, dataHash } } });
-  if (document) return toPublic(document);
+  if (document) {
+    assertDuplicateSeries(document, lineage);
+    return toPublic(document);
+  }
 
   const documentId = randomUUID();
   const storageObjectKey = `documents/${userId}/${documentId}`;
@@ -154,6 +209,14 @@ const registerDocument = async (userId, { bytes, fileName, contentType }, lineag
       },
     });
   } catch (error) {
+    if (!['P2002', 'P2003'].includes(error?.code)) {
+      // A lost response does not prove the INSERT rolled back. Never delete a
+      // possibly referenced object; even a negative lookup may precede commit.
+      const persisted = await prisma.uploadedDocument.findUnique({ where: { id: documentId } }).catch(() => null);
+      if (persisted) return toPublic(await processDocument(persisted.id));
+      throw error;
+    }
+    // Unique/FK constraint rejection means this attempt did not insert a row.
     await stratus.deleteUnreferenced(storageObjectKey).catch(() => {});
     if (error?.code !== 'P2002') throw error;
     document = await prisma.uploadedDocument.findUnique({ where: { userId_dataHash: { userId, dataHash } } });
@@ -161,6 +224,7 @@ const registerDocument = async (userId, { bytes, fileName, contentType }, lineag
       throw conflict('A newer version already exists for this document', undefined, 'DOCUMENT_VERSION_CONFLICT');
     }
     if (!document) throw error;
+    assertDuplicateSeries(document, lineage);
     return toPublic(document);
   }
   return toPublic(await processDocument(document.id));
@@ -278,4 +342,4 @@ const processDueDocuments = async (limit = config.jobs.batchSize) => {
   return { processed: due.length, completed };
 };
 
-module.exports = { hashFile, register, registerVersion, list, listVersions, retrieveFile, verify, verifyBytes, processDocument, processDueDocuments, __testing: { toPublic, backoffSeconds, assertTestnetProvider } };
+module.exports = { hashFile, register, registerVersion, list, listVersions, retrieveFile, verify, verifyBytes, processDocument, processDueDocuments, __testing: { toPublic, backoffSeconds, assertTestnetProvider, resetPendingReceipts: () => pendingReceipts.clear() } };

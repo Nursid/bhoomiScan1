@@ -6,13 +6,28 @@ This guide explains the existing `LandVerification` implementation and the futur
 
 | Area | Verified evidence | Still unverified or blocked |
 |---|---|---|
-| Contract | Hash-only registration, duplicate rejection, operator authorization, revocation, and read-only verification; 7 local Hardhat tests pass | No deployed BSC Testnet contract was inspected |
-| Backend | 252 unit tests across 13 suites pass, including document hashing, versioning, chain ID, and transaction retry/recovery cases | No database-backed end-to-end upload and chain-registration test |
+| Contract | Fresh Solidity 0.8.20 compilation (Paris EVM target); 12 local Hardhat tests pass, including operator removal, ownership transfer, missing records, and revocation history | No deployed BSC Testnet contract was inspected |
+| Backend | 322 unit tests across 16 suites pass, including mocked registration, read-only verification, chain mismatch, receipt recovery, and document retry behavior | This blockchain audit did not exercise a database; no end-to-end workflow with a real deployed BSC contract is claimed |
 | Stratus | One harmless Development-bucket text-object smoke test passed upload, download, byte/SHA-256 comparison, and exact-key delayed cleanup; a later GET returned 404 | This does not verify PDF/image upload through the API, the database, or bucket console ACL configuration |
-| PostgreSQL | Prisma schema validation passes; migrations exist | Migration is unapplied; integration tests are blocked while the dedicated local PostgreSQL test database is unavailable |
-| BSC Testnet | Code has a chain-ID 97 guard and the deploy script is testnet-only | The provider is disabled; no contract address or operator key is configured; RPC connectivity and operator authorization are unverified |
+| PostgreSQL | Prisma schema validation passes; migrations exist; integration setup requires explicit `TEST_DATABASE_URL` for `bhoomiscan_test` | Migrations/integration are unverified; an isolated Neon test database and explicit access approval are required. Existing application `DATABASE_URL` stays unchanged |
+| BSC Testnet | Read-only `eth_chainId` returned 97 (`0x61`); `eth_blockNumber` returned 137273017 in the latest check. The deploy script is testnet-only | Provider remains disabled; no contract address or deployment wallet was available in the preceding preflight. Balance, operator authorization, deployment, and real registration remain unverified |
 
 The Stratus evidence and its limits are recorded in [`STRATUS_STORAGE.md`](STRATUS_STORAGE.md). The data flow is already shown in [`ARCHITECTURE.md`](ARCHITECTURE.md); it is not repeated here.
+
+### Wallet-free blockchain audit and deployment prerequisites
+
+The latest blockchain checks used `npm --prefix blockchain run compile -- --force`, `npm --prefix blockchain test -- --network hardhat --no-compile`, and `npm run test:unit -- --runInBand`. Contract tests execute only on Hardhat's ephemeral local network with generated test accounts; backend tests mock blockchain calls. Neither proves deployed-contract compatibility. Compilation initially failed on sandbox access to Hardhat's compiler cache; the permitted retry downloaded compiler 0.8.20 and compiled successfully. No production code or Solidity behavior was changed.
+
+Before a separately approved deployment:
+
+1. The administrator must securely configure a dedicated testnet wallet using `OPERATOR_PRIVATE_KEY` and the approved `BSC_RPC_URL`; never put its key in documentation or test output. Hardhat's `bscTestnet` configuration fixes chain ID 97.
+2. Obtain the wallet's public address and check its testnet BNB balance. Repeat gas estimation with that sender and current gas price, including a safety margin. The earlier sender-free estimate was 702,752 gas at 0.1 gwei, or 0.0000702752 testnet BNB; it is not a guaranteed price or proof of sufficient funds.
+3. Rerun local tests and obtain explicit approval before invoking the existing deployment command. Do not run a mainnet command.
+4. Capture the resulting contract address, deployment transaction hash, chain ID, deployer public address, confirmed receipt/block, gas used, source revision, compiler settings, and ABI. The current script prints deployment details but does not save them to a deployment record.
+5. Verify deployed bytecode and read `owner`, `isOperator`, and `verifyLandData` before enabling the backend. Configure `LAND_VERIFICATION_CONTRACT_ADDRESS`, `SMART_CONTRACT_PROVIDER` (`bsc`), `BSC_CHAIN_ID` (`97`), `BSC_RPC_URL`, `BSC_EXPLORER_TX_URL`, and the securely held `OPERATOR_PRIVATE_KEY` only under separate configuration approval. A different backend signer requires an approved owner `setOperator` transaction. Read-only verification requires no key.
+6. Obtain separate approval for a synthetic document registration; retain its original transaction hash and verify the mined receipt and on-chain hash result. RPC connectivity alone does not verify registration or database persistence.
+
+Authorization caveat confirmed by local tests: transferring ownership leaves the former owner's explicit operator permission intact. The new owner must explicitly revoke it if required. Revocation retains the original hash, ID, registering address, and registration timestamp; the same hash cannot be registered again. The backend ABI covers registration and verification; it does not expose owner administration or revocation operations. The printed explorer-verification command additionally requires explorer/API-key configuration, which is not present in the current Hardhat configuration.
 
 ## What the contract records
 
@@ -134,10 +149,11 @@ The current contract registers one document hash per call. This keeps lookup and
 
 ## Existing completion checklist
 
-- [x] Local contract tests pass (7 tests).
-- [x] Backend unit tests pass (252 tests across 13 suites).
+- [x] Local contract tests pass (12 tests).
+- [x] Backend unit tests pass (322 tests across 16 suites).
+- [x] Read-only BSC Testnet RPC connectivity confirmed on chain ID 97; this is not a deployment or registration test.
 - [x] A limited Stratus Development smoke test verified upload, download, SHA-256 integrity, and delayed cleanup for one harmless text object.
-- [ ] Dedicated local PostgreSQL test database is available; migration and database integration tests remain blocked.
+- [ ] Isolated Neon `bhoomiscan_test` database is configured through process-environment `TEST_DATABASE_URL` and access is approved; migrations and database integration tests remain blocked. See the README's safe Neon test instructions.
 - [ ] BSC testnet deployment and address verification are pending and not currently authorized.
 - [ ] Testnet operator authorization, a confirmed registration receipt, and live document verification remain unverified.
 - [ ] Update fee assumptions from an approved live test receipt before production budgeting.

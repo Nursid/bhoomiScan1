@@ -1,8 +1,11 @@
 // Integration tests: real PostgreSQL (TEST_DATABASE_URL), external HTTP faked per test.
+const { requireTestDatabaseUrl } = require('./test-database-url');
+const testDatabaseUrl = requireTestDatabaseUrl();
+
 Object.assign(process.env, {
   NODE_ENV: 'test',
   DOTENV_PATH: '/nonexistent/.env',
-  DATABASE_URL: process.env.TEST_DATABASE_URL || 'postgresql://bhoomiscan:bhoomiscan@localhost:5436/bhoomiscan_test?schema=public',
+  DATABASE_URL: testDatabaseUrl,
   JWT_SECRET: 'integration-test-secret-that-is-longer-than-32-chars',
   SUREPASS_BASE_URL: 'https://sandbox.surepass.test',
   SUREPASS_TOKEN: 'surepass-test-token',

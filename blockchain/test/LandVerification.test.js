@@ -88,4 +88,73 @@ describe("LandVerification", function () {
     await expect(contract.connect(stranger).transferOwnership(operator.address))
       .to.be.revertedWithCustomError(contract, "Unauthorized");
   });
+
+  it("rejects zero addresses for operator and ownership changes", async function () {
+    await expect(contract.setOperator(ethers.ZeroAddress, true))
+      .to.be.revertedWithCustomError(contract, "ZeroAddress");
+    await expect(contract.transferOwnership(ethers.ZeroAddress))
+      .to.be.revertedWithCustomError(contract, "ZeroAddress");
+    expect(await contract.owner()).to.equal(owner.address);
+  });
+
+  it("removes operator write access while retaining public read access", async function () {
+    await contract.setOperator(operator.address, true);
+    await contract.connect(operator).registerLandData(HASH);
+    await contract.setOperator(operator.address, false);
+    expect(await contract.isOperator(operator.address)).to.equal(false);
+    await expect(contract.connect(operator).registerLandData(OTHER_HASH))
+      .to.be.revertedWithCustomError(contract, "Unauthorized");
+    await expect(contract.connect(operator).revokeVerification(1))
+      .to.be.revertedWithCustomError(contract, "Unauthorized");
+    await expect(contract.connect(operator).revokeVerificationByHash(HASH))
+      .to.be.revertedWithCustomError(contract, "Unauthorized");
+    expect((await contract.connect(stranger).verifyLandData(HASH)).isValid).to.equal(true);
+  });
+
+  it("rejects lookups and revocations of missing records", async function () {
+    await expect(contract.getVerificationById(1))
+      .to.be.revertedWithCustomError(contract, "RecordNotFoundById").withArgs(1);
+    await expect(contract.getVerificationByHash(HASH))
+      .to.be.revertedWithCustomError(contract, "RecordNotFound").withArgs(HASH);
+    await expect(contract.revokeVerification(1))
+      .to.be.revertedWithCustomError(contract, "RecordNotFoundById").withArgs(1);
+    await expect(contract.revokeVerificationByHash(HASH))
+      .to.be.revertedWithCustomError(contract, "RecordNotFound").withArgs(HASH);
+    expect(await contract.totalVerifications()).to.equal(0n);
+  });
+
+  it("revokes by hash without erasing registration history or permitting re-registration", async function () {
+    await contract.registerLandData(HASH);
+    const before = await contract.getVerificationById(1);
+    const tx = await contract.revokeVerificationByHash(HASH);
+    const receipt = await tx.wait();
+    const block = await ethers.provider.getBlock(receipt.blockNumber);
+    await expect(tx).to.emit(contract, "LandRecordRevoked")
+      .withArgs(1, HASH, owner.address, block.timestamp);
+    const after = await contract.getVerificationByHash(HASH);
+    expect(after.isRevoked).to.equal(true);
+    expect(after.verificationId).to.equal(before.verificationId);
+    expect(after.registeredBy).to.equal(before.registeredBy);
+    expect(after.timestamp).to.equal(before.timestamp);
+    expect(await contract.verificationIdToHash(1)).to.equal(HASH);
+    expect(await contract.totalVerifications()).to.equal(1n);
+    await expect(contract.registerLandData(HASH))
+      .to.be.revertedWithCustomError(contract, "DuplicateVerification");
+    await expect(contract.revokeVerificationByHash(HASH))
+      .to.be.revertedWithCustomError(contract, "VerificationRevoked");
+  });
+
+  it("preserves the former owner's explicit operator grant until the new owner revokes it", async function () {
+    await contract.transferOwnership(operator.address);
+    expect(await contract.owner()).to.equal(operator.address);
+    expect(await contract.isOperator(operator.address)).to.equal(true);
+    expect(await contract.isOperator(owner.address)).to.equal(true);
+    await expect(contract.setOperator(stranger.address, true))
+      .to.be.revertedWithCustomError(contract, "Unauthorized");
+    await contract.connect(operator).setOperator(owner.address, false);
+    expect(await contract.isOperator(owner.address)).to.equal(false);
+    await expect(contract.registerLandData(HASH))
+      .to.be.revertedWithCustomError(contract, "Unauthorized");
+    await contract.connect(operator).registerLandData(HASH);
+  });
 });

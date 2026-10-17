@@ -2,6 +2,11 @@ jest.mock('../../src/config', () => ({
   smartContract: { provider: 'bsc', maxAttempts: 4, bsc: { chainId: 97, contractAddress: `0x${'1'.repeat(40)}` } },
   jobs: { batchSize: 20 },
   jwt: { secret: 'focused-unit-test-jwt-secret-at-least-32-characters', issuer: 'bhoomiscan-api', expiresIn: '7d', isConfigured: true },
+  stratus: {
+    bucketName: 'bhoomiscan-documents', bucketUrl: 'https://bhoomiscan-documents-development.zohostratus.in',
+    oauthClientId: 'mock-client', oauthClientSecret: 'mock-secret', oauthRefreshToken: 'mock-refresh',
+    accountsUrl: 'https://accounts.zoho.in', timeoutMs: 1000, maxFileBytes: 10 * 1024 * 1024,
+  },
 }));
 jest.mock('../../src/database/prisma', () => ({
   prisma: { user: { findUnique: jest.fn() }, uploadedDocument: { findUnique: jest.fn(), create: jest.fn(), update: jest.fn(), updateMany: jest.fn(), findMany: jest.fn(), findFirst: jest.fn() } },
@@ -38,7 +43,8 @@ const doc = (overrides = {}) => ({
 
 describe('uploaded document registration', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    jest.resetAllMocks();
+    service.__testing.resetPendingReceipts();
     stratus.upload.mockResolvedValue({ objectKey: 'documents/owner-1/doc-1' });
     stratus.deleteUnreferenced.mockResolvedValue(true);
     prisma.uploadedDocument.updateMany.mockResolvedValue({ count: 1 });
@@ -101,19 +107,19 @@ describe('uploaded document registration', () => {
     expect(getSmartContractProvider().store).not.toHaveBeenCalled();
   });
 
-  test('removes only the just-uploaded unique object if database insert fails', async () => {
+  test('removes only the just-uploaded unique object after a definite foreign-key rejection', async () => {
     prisma.uploadedDocument.findUnique.mockResolvedValue(null);
-    prisma.uploadedDocument.create.mockRejectedValue(new Error('database unavailable'));
+    prisma.uploadedDocument.create.mockRejectedValue(Object.assign(new Error('foreign key rejected'), { code: 'P2003' }));
     await expect(service.register(owner, {
       bytes: Buffer.from('%PDF-db-failure'), fileName: 'failed.pdf', contentType: 'application/pdf',
-    })).rejects.toThrow('database unavailable');
+    })).rejects.toThrow('foreign key rejected');
     expect(stratus.deleteUnreferenced).toHaveBeenCalledWith(expect.stringMatching(/^documents\/owner-1\//));
     expect(getSmartContractProvider().store).not.toHaveBeenCalled();
   });
 
   test('preserves the database error when best-effort object cleanup fails', async () => {
     prisma.uploadedDocument.findUnique.mockResolvedValue(null);
-    const databaseError = new Error('database unavailable');
+    const databaseError = Object.assign(new Error('foreign key rejected'), { code: 'P2003' });
     prisma.uploadedDocument.create.mockRejectedValue(databaseError);
     stratus.deleteUnreferenced.mockRejectedValue(new Error('cleanup unavailable'));
 
@@ -141,6 +147,69 @@ describe('uploaded document registration', () => {
       userId: owner, documentSeriesId: 'series-1', versionNumber: 3, previousVersionId: previous.id,
     }) });
     expect(result).toMatchObject({ documentSeriesId: 'series-1', versionNumber: 3, previousVersionId: previous.id, chainId: 97 });
+  });
+
+  test('rejects version bytes belonging to another series before uploading', async () => {
+    const previous = doc({ id: 'previous', documentSeriesId: 'target-series' });
+    prisma.uploadedDocument.findFirst.mockResolvedValue(previous);
+    prisma.uploadedDocument.findUnique.mockResolvedValue(doc({ documentSeriesId: 'another-series' }));
+
+    await expect(service.registerVersion(owner, previous.id, {
+      bytes: Buffer.from('%PDF-another-series'), fileName: 'version.pdf', contentType: 'application/pdf',
+    })).rejects.toMatchObject({ code: 'DOCUMENT_VERSION_CONFLICT' });
+    expect(stratus.upload).not.toHaveBeenCalled();
+    expect(getSmartContractProvider().store).not.toHaveBeenCalled();
+  });
+
+  test('rejects a concurrent duplicate belonging to another series and cleans only the attempted key', async () => {
+    const previous = doc({ id: 'previous', documentSeriesId: 'target-series' });
+    prisma.uploadedDocument.findFirst.mockResolvedValue(previous);
+    prisma.uploadedDocument.findUnique.mockResolvedValueOnce(null).mockResolvedValueOnce(doc({ documentSeriesId: 'another-series' }));
+    prisma.uploadedDocument.create.mockRejectedValue(Object.assign(new Error('duplicate hash'), { code: 'P2002' }));
+
+    await expect(service.registerVersion(owner, previous.id, {
+      bytes: Buffer.from('%PDF-concurrent-duplicate'), fileName: 'version.pdf', contentType: 'application/pdf',
+    })).rejects.toMatchObject({ code: 'DOCUMENT_VERSION_CONFLICT' });
+    expect(stratus.deleteUnreferenced).toHaveBeenCalledWith(stratus.upload.mock.calls[0][0].key);
+    expect(getSmartContractProvider().store).not.toHaveBeenCalled();
+  });
+
+  test('recovers a committed insert after a lost database response without deleting its file', async () => {
+    let persisted;
+    prisma.uploadedDocument.findUnique.mockImplementation(async () => persisted || null);
+    prisma.uploadedDocument.create.mockImplementation(async ({ data }) => {
+      persisted = doc(data);
+      throw Object.assign(new Error('database response lost'), { code: 'P1001' });
+    });
+    prisma.uploadedDocument.update.mockImplementation(async ({ data }) => ({ ...persisted, ...data }));
+    getSmartContractProvider().store.mockResolvedValue({ transactionHash: txHash, chainId: 97 });
+
+    const result = await service.register(owner, {
+      bytes: Buffer.from('%PDF-committed'), fileName: 'committed.pdf', contentType: 'application/pdf',
+    });
+    expect(result).toMatchObject({ id: persisted.id, status: 'STORED', chainId: 97 });
+    expect(stratus.deleteUnreferenced).not.toHaveBeenCalled();
+    expect(getSmartContractProvider().store).toHaveBeenCalledTimes(1);
+  });
+
+  test.each([false, true])('retains an uploaded object when database commit is uncertain (lookup fails: %p)', async (lookupFails) => {
+    const databaseError = Object.assign(new Error('database response lost'), { code: 'P1001' });
+    prisma.uploadedDocument.findUnique.mockResolvedValueOnce(null);
+    if (lookupFails) prisma.uploadedDocument.findUnique.mockRejectedValueOnce(new Error('lookup unavailable'));
+    else prisma.uploadedDocument.findUnique.mockResolvedValueOnce(null);
+    prisma.uploadedDocument.create.mockRejectedValue(databaseError);
+
+    await expect(service.register(owner, {
+      bytes: Buffer.from('%PDF-uncertain'), fileName: 'uncertain.pdf', contentType: 'application/pdf',
+    })).rejects.toBe(databaseError);
+    expect(stratus.deleteUnreferenced).not.toHaveBeenCalled();
+    expect(getSmartContractProvider().store).not.toHaveBeenCalled();
+  });
+
+  test('fails safely for a legacy document without an original-file reference', async () => {
+    prisma.uploadedDocument.findFirst.mockResolvedValue(doc({ storageObjectKey: null }));
+    await expect(service.retrieveFile(owner, 'doc-1')).rejects.toMatchObject({ code: 'DOCUMENT_FILE_UNAVAILABLE' });
+    expect(stratus.download).not.toHaveBeenCalled();
   });
 
   test('maps a concurrent version-number uniqueness conflict and does not submit a second transaction', async () => {
@@ -222,6 +291,90 @@ describe('uploaded document registration', () => {
 
     expect(getSmartContractProvider().store).toHaveBeenCalledWith(expect.objectContaining({ transactionHash: txHash }));
     expect(result).toMatchObject({ status: 'STORED', transactionHash: txHash, verificationId: '14' });
+  });
+
+  test.each([1, 8])('checkpoints a successful receipt after its final save fails, then finalizes without resubmitting (attempt %p)', async (attempts) => {
+    let row = doc({ id: `receipt-checkpoint-${attempts}`, status: 'PROCESSING', attempts, maxAttempts: 8 });
+    prisma.uploadedDocument.findUnique.mockImplementation(async () => row);
+    prisma.uploadedDocument.update.mockRejectedValueOnce(new Error('synthetic receipt save failure'))
+      .mockImplementation(async ({ data }) => { row = { ...row, ...data }; return row; });
+    const provider = getSmartContractProvider();
+    provider.store.mockResolvedValue({ transactionHash: txHash, chainId: 97, externalReference: '42', blockNumber: 123 });
+
+    const pending = await service.processDocument(row.id);
+    expect(pending).toMatchObject({ status: 'PENDING', transactionHash: txHash, chainId: 97, errorCode: 'DOCUMENT_RECEIPT_PERSIST_FAILED' });
+    expect(pending.nextRetryAt).toBeInstanceOf(Date);
+    expect(pending.lockedUntil).toBeNull();
+    row.nextRetryAt = new Date(0); // Simulate a subsequent eligible worker claim.
+    const result = await service.processDocument(row.id);
+    expect(result).toMatchObject({ status: 'STORED', transactionHash: txHash, chainId: 97, verificationId: '42', blockNumber: 123, errorCode: null });
+    expect(provider.store).toHaveBeenCalledTimes(1);
+    expect(stratus.upload).not.toHaveBeenCalled();
+  });
+
+  test('retains the receipt in process when both persistence writes fail and retries only persistence', async () => {
+    let row = doc({ id: 'receipt-total-db-failure', status: 'PROCESSING', attempts: 1 });
+    prisma.uploadedDocument.findUnique.mockImplementation(async () => row);
+    prisma.uploadedDocument.update.mockRejectedValueOnce(new Error('synthetic final write failure'))
+      .mockRejectedValueOnce(new Error('synthetic checkpoint failure'))
+      .mockImplementation(async ({ data }) => { row = { ...row, ...data }; return row; });
+    const provider = getSmartContractProvider();
+    provider.store.mockResolvedValue({ transactionHash: txHash, chainId: 97, externalReference: '43' });
+
+    await expect(service.processDocument(row.id)).rejects.toMatchObject({
+      code: 'DOCUMENT_RECEIPT_PERSIST_FAILED', retryable: true, meta: { transactionHash: txHash, chainId: 97 },
+    });
+    expect(row.transactionHash).toBeNull();
+    const result = await service.processDocument(row.id);
+    expect(result).toMatchObject({ status: 'STORED', transactionHash: txHash, verificationId: '43' });
+    expect(provider.store).toHaveBeenCalledTimes(1);
+  });
+
+  test('recovers by the checkpointed original transaction hash after process memory is lost', async () => {
+    let row = doc({ id: 'receipt-checkpoint-restart', status: 'PROCESSING', attempts: 1 });
+    prisma.uploadedDocument.findUnique.mockImplementation(async () => row);
+    prisma.uploadedDocument.update.mockRejectedValueOnce(new Error('synthetic final save failure'))
+      .mockImplementation(async ({ data }) => { row = { ...row, ...data }; return row; });
+    const provider = getSmartContractProvider();
+    provider.store.mockResolvedValue({ transactionHash: txHash, chainId: 97, externalReference: '45' });
+
+    expect(await service.processDocument(row.id)).toMatchObject({ status: 'PENDING', transactionHash: txHash });
+    service.__testing.resetPendingReceipts(); // Simulate restart after a successful DB checkpoint.
+    row.nextRetryAt = new Date(0);
+    const recovered = await service.processDocument(row.id);
+    expect(recovered).toMatchObject({ status: 'STORED', transactionHash: txHash, verificationId: '45' });
+    expect(provider.store.mock.calls[1][0]).toEqual({ dataHash: row.dataHash, transactionHash: txHash });
+    expect(provider.store).toHaveBeenCalledTimes(2); // Second call recovers a receipt using the existing hash.
+    expect(stratus.upload).not.toHaveBeenCalled();
+  });
+
+  test('recognizes a committed receipt whose database response was lost without downgrading its status', async () => {
+    let row = doc({ id: 'receipt-committed-response-lost', status: 'PROCESSING', attempts: 1 });
+    prisma.uploadedDocument.findUnique.mockImplementation(async () => row);
+    prisma.uploadedDocument.update.mockImplementationOnce(async ({ data }) => {
+      row = { ...row, ...data };
+      throw new Error('synthetic response loss after commit');
+    });
+    getSmartContractProvider().store.mockResolvedValue({ transactionHash: txHash, chainId: 97 });
+
+    const result = await service.processDocument(row.id);
+    expect(result).toMatchObject({ status: 'STORED', transactionHash: txHash });
+    expect(prisma.uploadedDocument.update).toHaveBeenCalledTimes(1);
+  });
+
+  test('retries duplicate verification persistence without another registration or chain read', async () => {
+    let row = doc({ id: 'receipt-duplicate-save', status: 'PROCESSING', transactionHash: txHash, attempts: 1 });
+    prisma.uploadedDocument.findUnique.mockImplementation(async () => row);
+    prisma.uploadedDocument.update.mockRejectedValueOnce(new Error('synthetic duplicate save failure'))
+      .mockImplementation(async ({ data }) => { row = { ...row, ...data }; return row; });
+    const provider = getSmartContractProvider();
+    provider.store.mockRejectedValue(new ProviderError(409, 'SMART_CONTRACT_DUPLICATE', 'Synthetic duplicate'));
+    provider.verify.mockResolvedValue({ exists: true, isValid: true, chainId: 97, verificationId: '44' });
+
+    expect(await service.processDocument(row.id)).toMatchObject({ status: 'PENDING', transactionHash: txHash });
+    expect(await service.processDocument(row.id)).toMatchObject({ status: 'ALREADY_STORED', transactionHash: txHash, verificationId: '44' });
+    expect(provider.store).toHaveBeenCalledTimes(1);
+    expect(provider.verify).toHaveBeenCalledTimes(1);
   });
 
   test('treats a mined revert as terminal and preserves its transaction hash', async () => {
@@ -382,6 +535,67 @@ describe('uploaded document registration', () => {
     expect(response.status).toBe(201);
     expect(response.body.data.document.dataHash).toBe(service.hashFile(bytes));
     expect(prisma.uploadedDocument.create).toHaveBeenCalledWith({ data: expect.objectContaining({ userId: ownerId, dataHash: service.hashFile(bytes) }) });
+  });
+
+  test.each([
+    ['PDF', 'application/pdf', Buffer.from('%PDF-mocked-storage-roundtrip')],
+    ['PNG', 'image/png', Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZQmcAAAAASUVORK5CYII=', 'base64')],
+  ])('round-trips %s through real routes, hashing and Stratus client with mocked database/HTTP', async (_, contentType, bytes) => {
+    const actualStratus = jest.requireActual('../../src/integrations/stratus/stratus.client');
+    actualStratus.__testing.resetTokenCache();
+    let storedBytes;
+    let objectUrl;
+    let row;
+    const fetchMock = jest.spyOn(globalThis, 'fetch').mockImplementation(async (url, options) => {
+      if (String(url) === 'https://accounts.zoho.in/oauth/v2/token') {
+        return new Response(JSON.stringify({ access_token: 'mock-access', expires_in: 3600 }), { status: 200 });
+      }
+      expect(options.headers.authorization).toBe('Zoho-oauthtoken mock-access');
+      if (options.method === 'PUT') {
+        objectUrl = String(url);
+        storedBytes = Buffer.from(options.body);
+        return new Response(null, { status: 200 });
+      }
+      if (options.method === 'GET' && String(url) === objectUrl) {
+        return new Response(storedBytes, { status: 200, headers: { 'content-length': String(storedBytes.length) } });
+      }
+      throw new Error('Unexpected mocked HTTP request');
+    });
+    stratus.upload.mockImplementation(actualStratus.upload);
+    stratus.download.mockImplementation(actualStratus.download);
+    prisma.user.findUnique.mockResolvedValue({ id: ownerId, role: 'USER', status: 'ACTIVE' });
+    prisma.uploadedDocument.findUnique.mockImplementation(async () => row || null);
+    prisma.uploadedDocument.findFirst.mockImplementation(async ({ where }) =>
+      row && row.id === where.id && row.userId === where.userId ? row : null);
+    prisma.uploadedDocument.create.mockImplementation(async ({ data }) => { row = doc(data); return row; });
+    prisma.uploadedDocument.update.mockImplementation(async ({ data }) => { row = { ...row, ...data }; return row; });
+    getSmartContractProvider().store.mockResolvedValue({ transactionHash: txHash, chainId: 97 });
+    const token = jwt.sign({}, config.jwt.secret, { subject: ownerId, issuer: config.jwt.issuer, expiresIn: '5m' });
+    const app = express();
+    app.use('/documents', router);
+    app.use(errorHandler);
+
+    try {
+      const uploaded = await request(app).post('/documents').set('Authorization', `Bearer ${token}`)
+        .set('Content-Type', contentType).send(bytes);
+      expect(uploaded.status).toBe(201);
+      expect(uploaded.body.data.document).toMatchObject({ dataHash: service.hashFile(bytes), status: 'STORED', chainId: 97 });
+      expect(uploaded.body.data.document).not.toHaveProperty('storageObjectKey');
+      expect(row.storageObjectKey).toMatch(new RegExp(`^documents/${ownerId}/`));
+      expect(storedBytes).toEqual(bytes);
+      expect(prisma.uploadedDocument.create.mock.calls[0][0].data).not.toHaveProperty('bytes');
+
+      const downloaded = await request(app).get(`/documents/${row.id}/file`).set('Authorization', `Bearer ${token}`);
+      expect(downloaded.status).toBe(200);
+      expect(downloaded.body).toEqual(bytes);
+      expect(downloaded.headers['cache-control']).toBe('private, no-store');
+      expect(downloaded.headers['content-type']).toContain(contentType);
+      expect(fetchMock).toHaveBeenCalledTimes(3); // OAuth, PUT, GET; all intercepted locally.
+      expect(stratus.deleteUnreferenced).not.toHaveBeenCalled();
+    } finally {
+      fetchMock.mockRestore();
+      actualStratus.__testing.resetTokenCache();
+    }
   });
 
   test('rejects an upload larger than the configured request limit', async () => {

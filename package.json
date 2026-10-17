@@ -7,6 +7,7 @@
   "scripts": {
     "start": "node src/server.js",
     "postinstall": "prisma generate",
+    "predeploy:check": "node scripts/check-prisma-predeploy.js",
     "dev": "node --watch src/server.js",
     "worker": "node src/jobs/worker.js",
     "prisma:generate": "prisma generate",

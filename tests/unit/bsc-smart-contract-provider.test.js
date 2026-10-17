@@ -31,7 +31,7 @@ jest.mock('../../src/utils/apiAudit', () => ({ record: jest.fn() }));
 jest.mock('ethers', () => ({
   ethers: {
     JsonRpcProvider: jest.fn(() => mockRpcProvider),
-    Wallet: jest.fn(() => ({})),
+    Wallet: jest.fn(() => ({ address: `0x${'7'.repeat(40)}` })),
     Contract: jest.fn(() => mockContract),
   },
 }));
@@ -132,6 +132,39 @@ describe('BSC smart-contract provider', () => {
     mockContract.isOperator.mockResolvedValue(false);
     await expect(createBscSmartContractProvider().store({ dataHash: HASH })).rejects.toMatchObject({
       code: 'SMART_CONTRACT_SIGNER_UNAUTHORIZED',
+    });
+    expect(mockContract.registerLandData).not.toHaveBeenCalled();
+    expect(mockContract.isOperator).toHaveBeenCalledWith(`0x${'7'.repeat(40)}`);
+  });
+
+  test('rejects a read-only network mismatch before querying the contract', async () => {
+    mockRpcProvider.getNetwork.mockResolvedValue({ chainId: 56n });
+    await expect(createBscSmartContractProvider().verify({ dataHash: HASH })).rejects.toMatchObject({
+      code: 'SMART_CONTRACT_NETWORK_MISMATCH',
+    });
+    expect(mockContract.verifyLandData).not.toHaveBeenCalled();
+    expect(ethers.Wallet).not.toHaveBeenCalled();
+  });
+
+  test.each([
+    { values: [false, false, 0n, `0x${'0'.repeat(40)}`, 0n], exists: false, isValid: false },
+    { values: [true, false, 3n, `0x${'3'.repeat(40)}`, 1720000000n], exists: true, isValid: false },
+  ])('preserves unknown/revoked verification results without a signer ($exists)', async ({ values, exists, isValid }) => {
+    config.smartContract.bsc.privateKey = '';
+    mockContract.verifyLandData.mockResolvedValue(values);
+    const result = await createBscSmartContractProvider().verify({ dataHash: HASH });
+    expect(result).toMatchObject({ exists, isValid, chainId: 97 });
+    expect(ethers.Wallet).not.toHaveBeenCalled();
+    expect(mockContract.registerLandData).not.toHaveBeenCalled();
+  });
+
+  test('retains an unavailable original transaction as pending without a replacement', async () => {
+    const txHash = `0x${'8'.repeat(64)}`;
+    mockRpcProvider.getTransactionReceipt.mockResolvedValue(null);
+    mockRpcProvider.getTransaction.mockResolvedValue(null);
+    await expect(createBscSmartContractProvider().store({ dataHash: HASH, transactionHash: txHash })).rejects.toMatchObject({
+      code: 'SMART_CONTRACT_TX_PENDING', retryable: true,
+      meta: { transactionHash: txHash, chainId: 97 },
     });
     expect(mockContract.registerLandData).not.toHaveBeenCalled();
   });
