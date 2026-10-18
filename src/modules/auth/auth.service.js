@@ -90,16 +90,21 @@ const issueApplicationLogin = async (mobile) => {
 
   const { token } = tokens.generateToken({ ...user, loginMethod: LOGIN_METHOD });
   logger.info({ userId: user.id, isNewUser: !existing }, 'user logged in');
+  const profile = profileStatus(user);
   return {
     success: true,
     token,
+    // Saved name / email included so a new device can restore the profile.
     user: {
       id: user.id,
       mobile: user.mobile,
+      name: user.name || null,
+      email: user.email || null,
       loginMethod: LOGIN_METHOD,
+      isProfileCompleted: profile.complete,
       lastLoginAt: now.toISOString(),
     },
-    profile: profileStatus(user),
+    profile,
   };
 };
 
@@ -188,6 +193,7 @@ const googleUserResponse = (user) => ({
   email: user.email || null,
   name: user.name || null,
   loginMethod: GOOGLE_LOGIN_METHOD,
+  isProfileCompleted: profileStatus(user).complete,
   lastLoginAt: user.lastLoginAt ? user.lastLoginAt.toISOString() : null,
 });
 

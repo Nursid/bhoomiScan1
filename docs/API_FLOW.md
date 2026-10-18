@@ -47,8 +47,10 @@ curl -s -X POST $BASE/api/auth/mobile-verify \
   -d '{ "mobile": "917081002501", "otp": "302348", "reqId": "36697a704157303534313839" }'
 ```
 ```json
-{ "success": true, "token": "eyJhbGciOi...", "user": { "id": "ee5b…", "mobile": "+917081002501", "loginMethod": "mobile_otp", "lastLoginAt": "2026-10-16T06:00:00.000Z" }, "profile": { "complete": false, "missing": ["name"] } }
+{ "success": true, "token": "eyJhbGciOi...", "user": { "id": "ee5b…", "mobile": "+917081002501", "name": "Jatin", "email": "jatin@example.com", "loginMethod": "mobile_otp", "isProfileCompleted": true, "lastLoginAt": "2026-10-16T06:00:00.000Z" }, "profile": { "complete": true, "missing": [] } }
 ```
+`name` and `email` are the saved profile values (`null` until set with 2.6), so a new device can restore the profile right after login. `isProfileCompleted` equals `profile.complete`.
+
 | Error | Meaning |
 |---|---|
 | `400 INVALID_MOBILE` / `INVALID_OTP_FORMAT` / `REQ_ID_REQUIRED` | bad input |
@@ -66,7 +68,7 @@ curl -s -X POST $BASE/api/auth/google \
   -d '{ "idToken": "<Firebase ID token>" }'
 ```
 ```json
-{ "success": true, "token": "eyJhbGciOi...", "user": { "id": "6f1c…", "mobile": null, "email": "you@gmail.com", "name": "Your Name", "loginMethod": "google", "lastLoginAt": "…" }, "profile": { "complete": false, "missing": ["mobile"] } }
+{ "success": true, "token": "eyJhbGciOi...", "user": { "id": "6f1c…", "mobile": null, "email": "you@gmail.com", "name": "Your Name", "loginMethod": "google", "isProfileCompleted": false, "lastLoginAt": "…" }, "profile": { "complete": false, "missing": ["mobile"] } }
 ```
 | Error | Meaning |
 |---|---|

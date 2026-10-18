@@ -62,6 +62,21 @@ describe('mobile OTP sign-up: name required, email optional', () => {
     expect((await putProfile(auth, { email: 'Ram@Example.COM' })).body.data.user.email).toBe('ram@example.com');
     expect((await putProfile(auth, { email: '' })).body.data.user.email).toBeNull();
 
+    // Cross-device sync: logging in again (e.g. on a new phone) returns the saved profile.
+    await putProfile(auth, { email: 'ram@example.com' });
+    const newDevice = await app.post('/api/auth/mobile-verify').send({ mobile: '9100000101', otp: GOOD_OTP, reqId: REQ_ID });
+    expect(newDevice.body.user).toEqual({
+      id: res.body.user.id,
+      mobile: '+919100000101',
+      name: 'Ram Kumar',
+      email: 'ram@example.com',
+      loginMethod: 'mobile_otp',
+      isProfileCompleted: true,
+      lastLoginAt: expect.any(String),
+    });
+    expect(newDevice.body.profile).toEqual({ complete: true, missing: [] });
+    await putProfile(auth, { email: '' });
+
     const me = await app.get('/api/v1/users/me').set(auth);
     expect(me.body.data.profile).toEqual({ complete: true, missing: [] });
     const again = await login(app, '9100000101');

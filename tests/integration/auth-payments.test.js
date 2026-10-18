@@ -50,7 +50,7 @@ describe('auth', () => {
     expect(res.body).toEqual({
       success: true,
       token: expect.any(String),
-      user: { id: expect.any(String), mobile: '+919876543210', loginMethod: 'mobile_otp', lastLoginAt: expect.any(String) },
+      user: { id: expect.any(String), mobile: '+919876543210', name: null, email: null, loginMethod: 'mobile_otp', isProfileCompleted: false, lastLoginAt: expect.any(String) },
       profile: { complete: false, missing: ['name'] },
     });
 

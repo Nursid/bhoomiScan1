@@ -31,6 +31,9 @@
       "name": "Smart Contract"
     },
     {
+      "name": "Documents"
+    },
+    {
       "name": "Alerts"
     }
   ],
@@ -648,13 +651,45 @@
                           "type": "string",
                           "example": "+917081002501"
                         },
+                        "name": {
+                          "type": "string",
+                          "nullable": true,
+                          "description": "saved profile name (null until set)"
+                        },
+                        "email": {
+                          "type": "string",
+                          "nullable": true,
+                          "description": "saved profile email (null until set)"
+                        },
                         "loginMethod": {
                           "type": "string",
                           "example": "mobile_otp"
                         },
+                        "isProfileCompleted": {
+                          "type": "boolean",
+                          "description": "same as profile.complete"
+                        },
                         "lastLoginAt": {
                           "type": "string",
                           "format": "date-time"
+                        }
+                      }
+                    },
+                    "profile": {
+                      "type": "object",
+                      "properties": {
+                        "complete": {
+                          "type": "boolean"
+                        },
+                        "missing": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "enum": [
+                              "name",
+                              "mobile"
+                            ]
+                          }
                         }
                       }
                     }
@@ -747,6 +782,10 @@
                         "loginMethod": {
                           "type": "string",
                           "example": "google"
+                        },
+                        "isProfileCompleted": {
+                          "type": "boolean",
+                          "description": "same as profile.complete"
                         },
                         "lastLoginAt": {
                           "type": "string",
@@ -2027,6 +2066,290 @@
           }
         },
         "x-apidog-folder": "Smart Contract"
+      }
+    },
+    "/api/v1/documents": {
+      "post": {
+        "tags": [
+          "Documents"
+        ],
+        "summary": "Register an authenticated user's PDF or image hash",
+        "description": "Upload raw PDF, JPEG, PNG, or WebP bytes. The backend hashes the bytes and stores the original privately in the configured Zoho Catalyst Stratus bucket; PostgreSQL stores metadata and the object key only.",
+        "parameters": [
+          {
+            "name": "X-File-Name",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 255
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/pdf": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            },
+            "image/jpeg": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            },
+            "image/png": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            },
+            "image/webp": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Registration and initial version details"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "415": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-apidog-folder": "Documents"
+      },
+      "get": {
+        "tags": [
+          "Documents"
+        ],
+        "summary": "List the authenticated user's registered documents",
+        "responses": {
+          "200": {
+            "description": "Document registration history"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-apidog-folder": "Documents"
+      }
+    },
+    "/api/v1/documents/verify": {
+      "post": {
+        "tags": [
+          "Documents"
+        ],
+        "summary": "Hash uploaded bytes and verify them read-only on chain",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/pdf": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            },
+            "image/jpeg": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            },
+            "image/png": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            },
+            "image/webp": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Computed hash and read-only contract result"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-apidog-folder": "Documents"
+      }
+    },
+    "/api/v1/documents/{id}/file": {
+      "get": {
+        "tags": [
+          "Documents"
+        ],
+        "summary": "Download an owned document from private Stratus storage",
+        "description": "Requires authentication and document ownership. Returns raw bytes through the backend; no permanent bucket URL is exposed.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Original uploaded PDF or image bytes",
+            "content": {
+              "application/pdf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "image/jpeg": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "image/png": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "image/webp": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-apidog-folder": "Documents"
+      }
+    },
+    "/api/v1/documents/{id}/versions": {
+      "get": {
+        "tags": [
+          "Documents"
+        ],
+        "summary": "List versions of an owned document series",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Versions ordered from oldest to newest",
+            "including chain ID when known": null
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-apidog-folder": "Documents"
+      },
+      "post": {
+        "tags": [
+          "Documents"
+        ],
+        "summary": "Register a new version of the latest owned document version",
+        "description": "Upload raw PDF/image bytes. A version must reference the latest version in its series; submitting the same hash remains idempotent.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Id"
+          },
+          {
+            "name": "X-File-Name",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 255
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/pdf": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            },
+            "image/jpeg": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            },
+            "image/png": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            },
+            "image/webp": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "New version registration"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-apidog-folder": "Documents"
+      }
+    },
+    "/api/v1/documents/{id}/verify": {
+      "get": {
+        "tags": [
+          "Documents"
+        ],
+        "summary": "Verify an owned registration using a read-only contract call",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Registration and on-chain verification result"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-apidog-folder": "Documents"
       }
     },
     "/api/v1/smart-contract/records/{id}": {

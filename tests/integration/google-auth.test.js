@@ -67,6 +67,7 @@ describe('POST /api/auth/google', () => {
         email: 'asha@example.com',
         name: 'Asha Rao',
         loginMethod: 'google',
+        isProfileCompleted: false,
         lastLoginAt: expect.any(String),
       },
       profile: { complete: false, missing: ['mobile'] },
@@ -251,7 +252,7 @@ describe('mobile OTP login alongside Google accounts', () => {
     await googleLogin(app, idToken('asha'));
     await googleLogin(app, idToken('ravi'));
     const otp = await login(app, '9876543210');
-    expect(otp.user).toEqual({ id: expect.any(String), mobile: '+919876543210', loginMethod: 'mobile_otp', lastLoginAt: expect.any(String) });
+    expect(otp.user).toEqual({ id: expect.any(String), mobile: '+919876543210', name: null, email: null, loginMethod: 'mobile_otp', isProfileCompleted: false, lastLoginAt: expect.any(String) });
     expect(await prisma.user.count({ where: { mobile: null } })).toBe(2);
     expect(await prisma.user.count()).toBe(3);
   });

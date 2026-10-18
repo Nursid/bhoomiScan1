@@ -273,8 +273,16 @@ paths:
                     properties:
                       id: { type: string, format: uuid }
                       mobile: { type: string, example: '+917081002501' }
+                      name: { type: string, nullable: true, description: 'saved profile name (null until set)' }
+                      email: { type: string, nullable: true, description: 'saved profile email (null until set)' }
                       loginMethod: { type: string, example: mobile_otp }
+                      isProfileCompleted: { type: boolean, description: same as profile.complete }
                       lastLoginAt: { type: string, format: date-time }
+                  profile:
+                    type: object
+                    properties:
+                      complete: { type: boolean }
+                      missing: { type: array, items: { type: string, enum: [name, mobile] } }
         '400': { description: 'Invalid mobile number / Invalid OTP / reqId is required' }
         '401': { description: 'Invalid or expired OTP, or mobile does not match the OTP session' }
         '429': { $ref: '#/components/responses/Error' }
@@ -321,6 +329,7 @@ paths:
                       email: { type: string, example: 'asha@example.com' }
                       name: { type: string, nullable: true }
                       loginMethod: { type: string, example: google }
+                      isProfileCompleted: { type: boolean, description: same as profile.complete }
                       lastLoginAt: { type: string, format: date-time }
         '400': { description: 'ID_TOKEN_REQUIRED: idToken missing or malformed' }
         '401': { description: 'INVALID_ID_TOKEN / ID_TOKEN_EXPIRED / ID_TOKEN_REVOKED / UNSUPPORTED_SIGN_IN_PROVIDER' }
