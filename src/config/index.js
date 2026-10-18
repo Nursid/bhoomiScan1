@@ -139,6 +139,16 @@ const schema = z.object({
   JOB_PUSH_NOTIFICATIONS_INTERVAL_SECONDS: int(15, { min: 5 }),
   JOB_BATCH_SIZE: int(20, { min: 1 }),
 
+  // Catalyst Data Store (REST API, OAuth Self Client). See scripts/catalyst/oauth-setup.js.
+  CATALYST_PROJECT_ID: str(''),
+  CATALYST_ENVIRONMENT: oneOf(['Development', 'Production'], 'Development'),
+  CATALYST_API_URL: url('https://api.catalyst.zoho.in'),
+  CATALYST_ACCOUNTS_URL: url('https://accounts.zoho.in'),
+  CATALYST_OAUTH_CLIENT_ID: str(''),
+  CATALYST_OAUTH_CLIENT_SECRET: str(''),
+  CATALYST_OAUTH_REFRESH_TOKEN: str(''),
+  CATALYST_TIMEOUT_MS: int(20000, { min: 1000 }),
+
   RATE_LIMIT_WINDOW_SECONDS: int(60, { min: 1 }),
   RATE_LIMIT_GLOBAL_MAX: int(300, { min: 1 }),
   RATE_LIMIT_OTP_VERIFY_MAX: int(10, { min: 1 }),
@@ -304,6 +314,17 @@ const config = {
     subscriptionExpiryIntervalSeconds: env.JOB_SUBSCRIPTION_EXPIRY_INTERVAL_SECONDS,
     pushNotificationsIntervalSeconds: env.JOB_PUSH_NOTIFICATIONS_INTERVAL_SECONDS,
     batchSize: env.JOB_BATCH_SIZE,
+  },
+
+  catalyst: {
+    projectId: env.CATALYST_PROJECT_ID,
+    environment: env.CATALYST_ENVIRONMENT,
+    apiUrl: env.CATALYST_API_URL,
+    accountsUrl: env.CATALYST_ACCOUNTS_URL,
+    clientId: env.CATALYST_OAUTH_CLIENT_ID,
+    clientSecret: env.CATALYST_OAUTH_CLIENT_SECRET,
+    refreshToken: env.CATALYST_OAUTH_REFRESH_TOKEN,
+    timeoutMs: env.CATALYST_TIMEOUT_MS,
   },
 
   rateLimit: {

@@ -1,10 +1,11 @@
 /**
- * Alerts/events for users (record changed, verification failed, anchoring failed).
- * Stored in PostgreSQL; `notify` is the hook for push / SMS / email delivery,
- * which currently only logs (no message content beyond ids).
+ * Alerts/events for users (record changed, verification failed, anchoring failed,
+ * payment results). Stored in Catalyst Data Store; `notify` is the hook for
+ * push / SMS / email delivery, which currently only logs (no message content beyond ids).
  */
 
-const { prisma } = require('../../database/prisma');
+const { randomUUID } = require('crypto');
+const db = require('../../database');
 const logger = require('../../utils/logger');
 const { notFound } = require('../../utils/errors');
 
@@ -26,45 +27,54 @@ const notify = (alert) => {
   logger.info({ alertId: alert.id, userId: alert.userId, type: alert.type, severity: alert.severity }, 'alert created');
 };
 
-/** @param {object} [db] prisma or a transaction client */
-const createAlert = async (input, db = prisma) => {
-  const alert = await db.alert.create({
-    data: {
-      userId: input.userId,
-      landVerificationId: input.landVerificationId || null,
-      snapshotId: input.snapshotId || null,
-      type: input.type,
-      severity: input.severity || 'INFO',
-      title: input.title,
-      message: input.message,
-      data: input.data || undefined,
-    },
+/**
+ * @param {object} input
+ * @param {string} [input.id]  deterministic id from callers whose workflow may be retried,
+ *                             so a retry finds the existing alert instead of adding a second
+ * @param {object} [options]
+ * @param {boolean} [options.deferNotify]  caller calls notify() once its whole workflow is stored
+ */
+const createAlert = async (input, { deferNotify = false } = {}) => {
+  if (input.id) {
+    const existing = await db.alerts.findById(input.id);
+    if (existing) return existing;
+  }
+  const alert = await db.alerts.insert({
+    id: input.id || randomUUID(),
+    userId: input.userId,
+    landVerificationId: input.landVerificationId || null,
+    snapshotId: input.snapshotId || null,
+    type: input.type,
+    severity: input.severity || 'INFO',
+    title: input.title,
+    message: input.message,
+    data: input.data || null,
+    status: 'UNREAD',
   });
-  // Delivery happens after commit when called inside a transaction.
-  if (db === prisma) notify(alert);
+  if (!deferNotify) notify(alert);
   return alert;
 };
 
 const listAlerts = async (userId, { status, landVerificationId, skip, limit }) => {
   const where = { userId, ...(status ? { status } : {}), ...(landVerificationId ? { landVerificationId } : {}) };
   const [items, total, unread] = await Promise.all([
-    prisma.alert.findMany({ where, orderBy: { createdAt: 'desc' }, skip, take: limit }),
-    prisma.alert.count({ where }),
-    prisma.alert.count({ where: { userId, status: 'UNREAD' } }),
+    db.alerts.findMany({ where, orderBy: [['createdAt', 'desc']], offset: skip, limit }),
+    db.alerts.count(where),
+    db.alerts.count({ userId, status: 'UNREAD' }),
   ]);
   return { alerts: items.map(publicAlert), total, unread };
 };
 
 const markRead = async (userId, alertId) => {
-  const alert = await prisma.alert.findFirst({ where: { id: alertId, userId } });
+  const alert = await db.alerts.findOne({ id: alertId, userId });
   if (!alert) throw notFound('Alert not found', 'ALERT_NOT_FOUND');
   if (alert.status === 'READ') return publicAlert(alert);
-  return publicAlert(await prisma.alert.update({ where: { id: alert.id }, data: { status: 'READ', readAt: new Date() } }));
+  return publicAlert(await db.alerts.updateById(alert.id, { status: 'READ', readAt: new Date() }));
 };
 
 const markAllRead = async (userId) => {
-  const { count } = await prisma.alert.updateMany({ where: { userId, status: 'UNREAD' }, data: { status: 'READ', readAt: new Date() } });
-  return { updated: count };
+  const updated = await db.alerts.updateWhere({ userId, status: 'UNREAD' }, { status: 'READ', readAt: new Date() });
+  return { updated: updated.length };
 };
 
 module.exports = { createAlert, notify, listAlerts, markRead, markAllRead, publicAlert };

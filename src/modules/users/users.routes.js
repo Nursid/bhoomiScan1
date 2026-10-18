@@ -1,6 +1,6 @@
 const { Router } = require('express');
 const { z } = require('zod');
-const { prisma } = require('../../database/prisma');
+const db = require('../../database');
 const { authenticate } = require('../../middleware/authenticate');
 const validate = require('../../middleware/validate');
 const { ok } = require('../../utils/response');
@@ -45,7 +45,7 @@ const router = Router();
 router.use(authenticate);
 
 router.get('/me', async (req, res) => {
-  const user = await prisma.user.findUniqueOrThrow({ where: { id: req.user.id } });
+  const user = await db.users.findByIdOrThrow(req.user.id, 'USER_NOT_FOUND');
   const subscription = await subscriptionsService.findActiveSubscription(user.id);
   ok(res, {
     user: publicUser(user),
@@ -64,7 +64,7 @@ router.put('/me/profile', validate({ body: profileSchema }), ...otpVerifyLimiter
 );
 
 router.patch('/me', validate({ body: updateMeSchema }), async (req, res) => {
-  const user = await prisma.user.update({ where: { id: req.user.id }, data: req.body });
+  const user = await db.users.updateById(req.user.id, req.body);
   ok(res, { user: publicUser(user) });
 });
 

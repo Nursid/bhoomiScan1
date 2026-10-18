@@ -3,21 +3,21 @@
  * shape; stack traces, provider bodies and internal messages are only logged.
  */
 
-const { Prisma } = require('@prisma/client');
 const { AppError } = require('../utils/errors');
 const logger = require('../utils/logger');
-const { describeDatabaseUrl, describeDbError } = require('../database/diagnostics');
 
-const fromPrisma = (error) => {
-  if (error instanceof Prisma.PrismaClientKnownRequestError) {
-    if (error.code === 'P2002') return new AppError(409, 'CONFLICT', 'Resource already exists');
-    if (error.code === 'P2025') return new AppError(404, 'NOT_FOUND', 'Resource not found');
+/** Catalyst data layer errors -> the same client codes the API returned before. */
+const fromDataStore = (error) => {
+  if (error?.name === 'DataStoreError') {
+    if (/NOT_FOUND$/.test(error.code)) return new AppError(404, 'NOT_FOUND', 'Resource not found');
+    return null; // programming / validation errors stay 500 (logged)
   }
-  if (error instanceof Prisma.PrismaClientInitializationError) {
-    // The client still only sees DATABASE_UNAVAILABLE; the real cause goes to the log.
-    return new AppError(503, 'DATABASE_UNAVAILABLE', 'Database is unavailable', {
-      meta: { dbError: describeDbError(error), database: describeDatabaseUrl() },
-    });
+  if (error?.name === 'CatalystError') {
+    if (error.code === 'DUPLICATE_VALUE') return new AppError(409, 'CONFLICT', 'Resource already exists');
+    if (['CATALYST_UNAVAILABLE', 'CATALYST_AUTH_FAILED', 'CATALYST_NOT_CONFIGURED'].includes(error.code) || error.status >= 500 || error.status === 429) {
+      // The client only sees DATABASE_UNAVAILABLE; the cause goes to the log.
+      return new AppError(503, 'DATABASE_UNAVAILABLE', 'Database is unavailable', { meta: { catalystCode: error.code, catalystStatus: error.status } });
+    }
   }
   return null;
 };
@@ -39,7 +39,7 @@ const notFoundHandler = (req, res) => {
 
 // eslint-disable-next-line no-unused-vars
 const errorHandler = (err, req, res, next) => {
-  const error = err instanceof AppError ? err : fromBodyParser(err) || fromPrisma(err);
+  const error = err instanceof AppError ? err : fromBodyParser(err) || fromDataStore(err);
   const log = req.log || logger;
 
   if (!error) {
@@ -63,8 +63,8 @@ const errorHandler = (err, req, res, next) => {
       providerStatus: error.providerStatus,
       providerMessage: error.providerMessage,
       meta: error.meta,
-      // Prisma errors are logged via meta.dbError (sanitized) instead of the raw error.
-      ...(error.statusCode >= 500 && err !== error && !error.meta?.dbError ? { err } : {}),
+      // Mapped 5xx errors keep the original error in the log (Catalyst errors carry only code / message).
+      ...(error.statusCode >= 500 && err !== error ? { err } : {}),
     },
     error.message,
   );

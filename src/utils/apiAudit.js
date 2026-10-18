@@ -3,12 +3,14 @@
  * never blocks the caller: an audit failure must not fail a business operation.
  */
 
-const config = require('../config');
+const { randomUUID } = require('crypto');
 const logger = require('./logger');
 const requestContext = require('./requestContext');
 const { sanitize } = require('./sanitize');
 
-const MAX_BODY_CHARS = 20000;
+// Catalyst Text columns hold 10,000 characters; JSON escaping can grow a preview, so the
+// stored value is kept well below that.
+const MAX_BODY_CHARS = 4000;
 
 const clip = (value) => {
   if (value === undefined || value === null) {
@@ -20,11 +22,21 @@ const clip = (value) => {
 };
 
 const record = (entry) => {
-  if (!config.databaseUrl) {
+  // Lazy require keeps this util usable in unit tests without a database.
+  let db;
+  let catalyst;
+  try {
+    db = require('../database');
+    catalyst = require('../database/catalyst/client');
+  } catch {
+    return;
+  }
+  if (process.env.DATA_BACKEND !== 'memory' && !catalyst.isConfigured()) {
     return;
   }
   const context = requestContext.get();
   const data = {
+    id: randomUUID(),
     userId: entry.userId || context.userId || null,
     requestId: context.requestId || null,
     provider: entry.provider,
@@ -42,14 +54,7 @@ const record = (entry) => {
     attempt: entry.attempt || 1,
   };
 
-  // Lazy require keeps this util usable in unit tests without a database.
-  let prisma;
-  try {
-    ({ prisma } = require('../database/prisma'));
-  } catch {
-    return;
-  }
-  prisma.apiRequestLog.create({ data }).catch((error) => {
+  db.apiRequestLogs.insert(data).catch((error) => {
     logger.warn({ err: error.message, provider: data.provider }, 'Could not write api request log');
   });
 };

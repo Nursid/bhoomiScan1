@@ -4,7 +4,7 @@
  * `requireRole(role)`: must run after authenticate.
  */
 
-const { prisma } = require('../database/prisma');
+const db = require('../database');
 const tokens = require('../modules/auth/token.service');
 const requestContext = require('../utils/requestContext');
 const { unauthorized, forbidden } = require('../utils/errors');
@@ -15,10 +15,7 @@ const authenticate = async (req, res, next) => {
     throw unauthorized('Authorization token is required', 'TOKEN_REQUIRED');
   }
   const claims = tokens.verifyToken(token);
-  const user = await prisma.user.findUnique({
-    where: { id: String(claims.sub) },
-    select: { id: true, mobile: true, role: true, status: true },
-  });
+  const user = await db.users.findById(String(claims.sub));
   if (!user) {
     throw unauthorized('Invalid login token', 'INVALID_TOKEN');
   }
