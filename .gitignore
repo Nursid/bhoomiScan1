@@ -10,3 +10,7 @@ coverage/
 # Firebase / Google service account keys (private keys, never commit)
 *-firebase-adminsdk-*.json
 serviceAccount*.json
+
+# Local backup / leftover files
+*.bak
+*.old

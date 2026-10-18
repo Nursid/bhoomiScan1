@@ -124,6 +124,14 @@ const schema = z.object({
   LAND_VERIFICATION_CONTRACT_ADDRESS: str(''),
   OPERATOR_PRIVATE_KEY: str(''),
 
+  // Zoho Catalyst Stratus REST API (India data center for the configured bucket).
+  STRATUS_BUCKET_NAME: str(''),
+  STRATUS_BUCKET_URL: url(''),
+  STRATUS_PROJECT_ID: str(''),
+  STRATUS_OAUTH_CLIENT_ID: str(''),
+  STRATUS_OAUTH_CLIENT_SECRET: str(''),
+  STRATUS_OAUTH_REFRESH_TOKEN: str(''),
+
   JOBS_ENABLED: bool(true),
   JOB_RECURRING_VERIFICATION_INTERVAL_SECONDS: int(300, { min: 5 }),
   JOB_SMART_CONTRACT_RETRY_INTERVAL_SECONDS: int(60, { min: 5 }),
@@ -135,6 +143,7 @@ const schema = z.object({
   RATE_LIMIT_GLOBAL_MAX: int(300, { min: 1 }),
   RATE_LIMIT_OTP_VERIFY_MAX: int(10, { min: 1 }),
   RATE_LIMIT_GOOGLE_LOGIN_MAX: int(20, { min: 1 }),
+    RATE_LIMIT_ADMIN_LOGIN_MAX: int(10, { min: 1 }),
   RATE_LIMIT_LAND_VERIFY_MAX: int(20, { min: 1 }),
 });
 
@@ -275,6 +284,19 @@ const config = {
     },
   },
 
+  stratus: {
+    bucketName: env.STRATUS_BUCKET_NAME,
+    bucketUrl: env.STRATUS_BUCKET_URL,
+    projectId: env.STRATUS_PROJECT_ID,
+    oauthClientId: env.STRATUS_OAUTH_CLIENT_ID,
+    oauthClientSecret: env.STRATUS_OAUTH_CLIENT_SECRET,
+    oauthRefreshToken: env.STRATUS_OAUTH_REFRESH_TOKEN,
+    accountsUrl: 'https://accounts.zoho.in',
+    apiUrl: 'https://api.catalyst.zoho.in',
+    timeoutMs: 30000,
+    maxFileBytes: 10 * 1024 * 1024,
+  },
+
   jobs: {
     enabled: env.JOBS_ENABLED,
     recurringVerificationIntervalSeconds: env.JOB_RECURRING_VERIFICATION_INTERVAL_SECONDS,
@@ -289,6 +311,7 @@ const config = {
     globalMax: env.RATE_LIMIT_GLOBAL_MAX,
     otpVerifyMax: env.RATE_LIMIT_OTP_VERIFY_MAX,
     googleLoginMax: env.RATE_LIMIT_GOOGLE_LOGIN_MAX,
+        adminLoginMax: env.RATE_LIMIT_ADMIN_LOGIN_MAX,
     landVerifyMax: env.RATE_LIMIT_LAND_VERIFY_MAX,
   },
 };

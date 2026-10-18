@@ -54,10 +54,19 @@ const googleLoginLimiter = base({
   keyGenerator: (req) => `google-login-ip:${ipKey(req)}`,
 });
 
+// Admin password login: keyed by IP and by the submitted email, to slow down password guessing.
+const adminLoginLimiters = [
+  base({ limit: config.rateLimit.adminLoginMax, keyGenerator: (req) => `admin-login-ip:${ipKey(req)}` }),
+  base({
+    limit: config.rateLimit.adminLoginMax,
+    keyGenerator: (req) => `admin-login-email:${String(req.body?.email || '').trim().toLowerCase() || 'none'}`,
+  }),
+];
+
 // Keyed by user (runs after authenticate).
 const landVerifyLimiter = base({
   limit: config.rateLimit.landVerifyMax,
   keyGenerator: (req) => `land-verify:${req.user?.id || ipKey(req)}`,
 });
 
-module.exports = { globalLimiter, otpVerifyLimiters, googleLoginLimiter, landVerifyLimiter };
+module.exports = { globalLimiter, otpVerifyLimiters, googleLoginLimiter, adminLoginLimiters, landVerifyLimiter };

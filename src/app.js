@@ -35,22 +35,29 @@ const createApp = () => {
     }),
   );
   app.use(helmet());
-  app.use(
-    cors({
-      // Mobile apps / server-to-server calls send no Origin and are unaffected.
-      // CORS_ORIGINS=* allows any browser origin (auth is still enforced by the Bearer token).
-      origin: (origin, callback) => {
-        const allowed =
-          !origin || config.corsOrigins.includes('*') || config.corsOrigins.includes(origin.replace(/\/+$/, '').toLowerCase());
-        if (!allowed) logger.warn({ origin, allowedOrigins: config.corsOrigins }, 'CORS origin rejected');
-        callback(null, allowed);
-      },
-      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
-      allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-Id'],
-      exposedHeaders: ['X-Request-Id', 'Retry-After'],
-      maxAge: 600,
-    }),
-  );
+
+  // CORS: AppSail's gateway may already add Access-Control-Allow-Origin for authorized
+  // domains. Sending it from Express as well gives a duplicated header, which browsers reject.
+  // Set DISABLE_APP_CORS=true on AppSail when the gateway handles CORS.
+  if (process.env.DISABLE_APP_CORS !== 'true') {
+    app.use(
+      cors({
+        // Mobile apps / server-to-server calls send no Origin and are unaffected.
+        // CORS_ORIGINS=* allows any browser origin (auth is still enforced by the Bearer token).
+        origin: (origin, callback) => {
+          const allowed =
+            !origin || config.corsOrigins.includes('*') || config.corsOrigins.includes(origin.replace(/\/+$/, '').toLowerCase());
+          if (!allowed) logger.warn({ origin, allowedOrigins: config.corsOrigins }, 'CORS origin rejected');
+          callback(null, allowed);
+        },
+        methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
+        allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-Id', 'X-File-Name'],
+        exposedHeaders: ['X-Request-Id', 'Retry-After'],
+        maxAge: 600,
+      }),
+    );
+  }
+
   app.use(
     express.json({
       limit: '200kb',

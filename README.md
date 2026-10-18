@@ -72,10 +72,30 @@ A test form that builds itself from `GET /states` is served at `/land`. It asks 
 | `npm run worker` | Jobs only (run the API with `JOBS_ENABLED=false` when you scale out) |
 | `npm test` | Unit + integration tests |
 | `npm run test:unit` | No database needed |
-| `npm run test:integration` | Needs PostgreSQL. Default `postgresql://bhoomiscan:bhoomiscan@localhost:5436/bhoomiscan_test`, override with `TEST_DATABASE_URL`. Migrations are applied automatically. |
+| `npm run test:integration` | Requires explicit process-environment `TEST_DATABASE_URL` for disposable PostgreSQL database `bhoomiscan_test` (Neon supported). No fallback. Automatically applies migrations; tests truncate fixture tables. |
 | `npm run prisma:migrate` / `prisma:deploy` / `db:seed` | Database |
 
-Create the test database once with `docker exec bhoomiscan-postgres psql -U bhoomiscan -c "CREATE DATABASE bhoomiscan_test;"`.
+### Safe Neon integration testing
+
+Keep the existing application `DATABASE_URL` unchanged. A local PostgreSQL server is not required. First check for an existing isolated, disposable Neon test branch/database. Only if none is suitable, prepare a separate empty test project after approval; do not copy application data. The test database must be named `bhoomiscan_test` and use test-only credentials. Choose its direct (non-pooled) connection URL in Neon Console, preserve TLS settings, and use the `public` schema. The test role needs permission to apply migrations and truncate its test tables; it must not have access to application/production data.
+
+Export `TEST_DATABASE_URL` only into the shell that launches Jest or the CI secret environment. The placeholder format is `postgresql://<test-role>:<encoded-password>@<test-endpoint>/bhoomiscan_test?sslmode=require&schema=public`. Do not paste credentials into command history, documentation, or Git. Merely adding the variable to `.env` does not configure integration setup: it intentionally does not load that file for URL selection. `.env.example` contains names/placeholders only for testing.
+
+The shared guard in `tests/setup/test-database-url.js` runs before both migration setup and worker configuration. It rejects missing, malformed, non-PostgreSQL URLs and any database name other than exactly `bhoomiscan_test`. It never falls back to the application `DATABASE_URL`. Only the migration child and test workers receive the validated URL as their own `DATABASE_URL`; the application's environment file is unchanged.
+
+**The name check cannot prove Neon project isolation.** Before approving execution, manually confirm the endpoint belongs to the disposable test project and the credentials cannot access application data. A database named `bhoomiscan_test` on an inappropriate endpoint must not be used.
+
+After explicit approval for test-database access and destructive testing, run from the existing repository:
+
+```powershell
+npm run test:integration -- --selectProjects integration
+```
+
+This command applies all pending migrations automatically (`prisma migrate deploy`) and the integration fixtures issue `TRUNCATE ... RESTART IDENTITY CASCADE`, including dependent tables. All test data is disposable. No separate migration, reset, or seed command against the application `DATABASE_URL` is needed. Avoid `npm test` until the isolated test database is approved, since it includes integration tests. For safe checks without database access, use `npm run test:unit -- --selectProjects unit --runInBand`.
+
+`tests/integration/uploaded-documents.test.js` prepares 17 database-backed cases for PDF/PNG upload and download, ownership, hashes, object references, duplicates, version history/concurrent successors, invalid files, legacy file references, storage/insert failures, lost insert responses, transaction recovery/reverts, and read-only verification. It uses the real application routes and Prisma with mocked Stratus and blockchain providers; it does not test live storage permissions or blockchain behavior. This suite has been prepared and syntax-checked only, not executed against Neon. Existing Neon branches may be used if independently confirmed isolated and disposable; a new project is not mandatory. Neither an unpooled application URL nor a branch label establishes isolation.
+
+The 2026-10-17 safe local run passed 288 unit tests across 15 suites. This includes PDF and PNG round-trips through real routes and the real Stratus client with HTTP and Prisma mocked. It verifies application logic and reference/byte handling, not actual SQL commits, constraints, live bucket permissions, or blockchain receipts. Cross-series duplicate versions are rejected. After a definite unique/foreign-key insert rejection, only the attempted object is cleaned up; uncertain insert outcomes retain the object to avoid deleting a potentially committed file. Retained unreferenced objects may require reconciliation once database access is approved.
 
 ## Adding a state or provider
 
