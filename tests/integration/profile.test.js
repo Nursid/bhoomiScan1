@@ -55,7 +55,7 @@ describe('mobile OTP sign-up: name required, email optional', () => {
     const done = await putProfile(auth, { name: '  Ram   Kumar ' });
     expect(done.status).toBe(200);
     expect(done.body.data).toEqual({
-      user: { id: res.body.user.id, name: 'Ram Kumar', mobile: '+919100000101', email: null },
+      user: { id: res.body.user.id, name: 'Ram Kumar', mobile: '+919100000101', mobileVerified: true, email: null },
       profile: { complete: true, missing: [] },
     });
 
@@ -68,6 +68,7 @@ describe('mobile OTP sign-up: name required, email optional', () => {
     expect(newDevice.body.user).toEqual({
       id: res.body.user.id,
       mobile: '+919100000101',
+      mobileVerified: true,
       name: 'Ram Kumar',
       email: 'ram@example.com',
       loginMethod: 'mobile_otp',
@@ -108,18 +109,47 @@ describe('mobile OTP sign-up: name required, email optional', () => {
   });
 });
 
-describe('Google sign-up: name + OTP-verified mobile required', () => {
-  test('Google name is kept; mobile needs a correct OTP; afterwards OTP login opens the same account', async () => {
+describe('Google sign-up: complete without a mobile; mobile optional, no OTP needed', () => {
+  test('Google user with a name is complete immediately; mobile is never "missing"', async () => {
     const g = await googleLogin('asha');
-    expect(g.profile).toEqual({ complete: false, missing: ['mobile'] });
+    expect(g.profile).toEqual({ complete: true, missing: [] });
+    expect(g.user).toMatchObject({ mobile: null, mobileVerified: false, isProfileCompleted: true });
+    const me = await app.get('/api/v1/users/me').set(g.auth);
+    expect(me.body.data.profile).toEqual({ complete: true, missing: [] });
+    expect((await putProfile(g.auth, { name: 'Asha Rao' })).status).toBe(200); // no mobile required
+  });
 
-    const noMobile = await putProfile(g.auth, { name: 'Asha Rao' });
-    expect(noMobile.status).toBe(422);
-    expect(noMobile.body.error.details.map((d) => d.field)).toEqual(['mobile']);
+  test('mobile without OTP is accepted as the contact number (PUT and PATCH)', async () => {
+    const g = await googleLogin('asha');
+    const put = await putProfile(g.auth, { mobile: '9100000211' });
+    expect(put.status).toBe(200);
+    expect(put.body.data).toEqual({
+      user: { id: g.user.id, name: 'Asha Rao', mobile: '+919100000211', mobileVerified: false, email: 'asha@example.com' },
+      profile: { complete: true, missing: [] },
+    });
+    const patch = await app.patch('/api/v1/users/me').set(g.auth).send({ mobile: '9100000212', name: 'Asha R' });
+    expect(patch.status).toBe(200);
+    expect(patch.body.data.user).toMatchObject({ mobile: '+919100000212', mobileVerified: false, name: 'Asha R' });
+    expect((await app.get('/api/auth/me').set(g.auth)).body.user).toMatchObject({ mobile: '+919100000212', mobileVerified: false });
+    expect((await googleLogin('asha')).user).toMatchObject({ mobile: '+919100000212', mobileVerified: false });
+    // invalid number still rejected
+    expect((await putProfile(g.auth, { mobile: '12' })).body.error.code).toBe('INVALID_MOBILE');
+    await app.patch('/api/v1/users/me').set(g.auth).send({ name: 'Asha Rao' });
+  });
 
-    const noOtp = await putProfile(g.auth, { mobile: '9100000201' });
-    expect(noOtp.status).toBe(400);
-    expect(noOtp.body.error.code).toBe('INVALID_OTP_FORMAT');
+  test('SECURITY: a number saved without OTP never opens the Google account via OTP login', async () => {
+    const g = await googleLogin('meera');
+    await putProfile(g.auth, { mobile: '9100000221' });
+    // The real owner of that number logs in with OTP: they get their OWN new account.
+    const owner = await login(app, '9100000221');
+    expect(owner.user.id).not.toBe(g.user.id);
+    const googleRow = await prisma.user.findUnique({ where: { firebaseUid: 'uid-meera' } });
+    expect(googleRow).toMatchObject({ mobile: null, contactMobile: '+919100000221' });
+    await prisma.user.update({ where: { id: googleRow.id }, data: { contactMobile: null } });
+  });
+
+  test('mobile with OTP is verified and becomes a login number (optional path)', async () => {
+    const g = await googleLogin('asha');
 
     const wrongOtp = await putProfile(g.auth, { mobile: '9100000201', otp: '000000', reqId: REQ_ID });
     expect(wrongOtp.status).toBe(401);
@@ -129,7 +159,7 @@ describe('Google sign-up: name + OTP-verified mobile required', () => {
     const ok = await putProfile(g.auth, { mobile: '9100000201', otp: GOOD_OTP, reqId: REQ_ID });
     expect(ok.status).toBe(200);
     expect(ok.body.data).toEqual({
-      user: { id: g.user.id, name: 'Asha Rao', mobile: '+919100000201', email: 'asha@example.com' },
+      user: { id: g.user.id, name: 'Asha Rao', mobile: '+919100000201', mobileVerified: true, email: 'asha@example.com' },
       profile: { complete: true, missing: [] },
     });
     expect(fake.callsTo(/verifyOtp$/).pop().body).toMatchObject({ reqId: REQ_ID, otp: GOOD_OTP });
@@ -139,12 +169,12 @@ describe('Google sign-up: name + OTP-verified mobile required', () => {
     expect((await googleLogin('asha')).profile).toEqual({ complete: true, missing: [] });
   });
 
-  test('Google account without a name must send both name and mobile', async () => {
+  test('Google account without a name: only "name" is missing, never "mobile"', async () => {
     const g = await googleLogin('noname');
-    expect(g.profile).toEqual({ complete: false, missing: ['name', 'mobile'] });
+    expect(g.profile).toEqual({ complete: false, missing: ['name'] });
     const res = await putProfile(g.auth, {});
-    expect(res.body.error.details.map((d) => d.field)).toEqual(['name', 'mobile']);
-    const ok = await putProfile(g.auth, { name: 'Kiran Patel', mobile: '9100000202', otp: GOOD_OTP, reqId: REQ_ID });
+    expect(res.body.error.details.map((d) => d.field)).toEqual(['name']);
+    const ok = await putProfile(g.auth, { name: 'Kiran Patel' });
     expect(ok.body.data.profile).toEqual({ complete: true, missing: [] });
   });
 

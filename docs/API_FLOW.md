@@ -47,7 +47,7 @@ curl -s -X POST $BASE/api/auth/mobile-verify \
   -d '{ "mobile": "917081002501", "otp": "302348", "reqId": "36697a704157303534313839" }'
 ```
 ```json
-{ "success": true, "token": "eyJhbGciOi...", "user": { "id": "ee5b…", "mobile": "+917081002501", "name": "Jatin", "email": "jatin@example.com", "loginMethod": "mobile_otp", "isProfileCompleted": true, "lastLoginAt": "2026-10-16T06:00:00.000Z" }, "profile": { "complete": true, "missing": [] } }
+{ "success": true, "token": "eyJhbGciOi...", "user": { "id": "ee5b…", "mobile": "+917081002501", "mobileVerified": true, "name": "Jatin", "email": "jatin@example.com", "loginMethod": "mobile_otp", "isProfileCompleted": true, "lastLoginAt": "2026-10-16T06:00:00.000Z" }, "profile": { "complete": true, "missing": [] } }
 ```
 `name` and `email` are the saved profile values (`null` until set with 2.6), so a new device can restore the profile right after login. `isProfileCompleted` equals `profile.complete`.
 
@@ -68,7 +68,7 @@ curl -s -X POST $BASE/api/auth/google \
   -d '{ "idToken": "<Firebase ID token>" }'
 ```
 ```json
-{ "success": true, "token": "eyJhbGciOi...", "user": { "id": "6f1c…", "mobile": null, "email": "you@gmail.com", "name": "Your Name", "loginMethod": "google", "isProfileCompleted": false, "lastLoginAt": "…" }, "profile": { "complete": false, "missing": ["mobile"] } }
+{ "success": true, "token": "eyJhbGciOi...", "user": { "id": "6f1c…", "mobile": null, "mobileVerified": false, "email": "you@gmail.com", "name": "Your Name", "loginMethod": "google", "isProfileCompleted": true, "lastLoginAt": "…" }, "profile": { "complete": true, "missing": [] } }
 ```
 | Error | Meaning |
 |---|---|
@@ -117,42 +117,44 @@ Only `name` and `email` can be changed. `GET` also returns `profile` (see 2.6).
 
 Every login response (2.1, 2.2) and `GET /api/v1/users/me` include:
 ```json
-"profile": { "complete": false, "missing": ["name", "mobile"] }
+"profile": { "complete": false, "missing": ["name"] }
 ```
-If `complete` is `false`, show a profile screen asking for the fields in `missing`.
+If `complete` is `false`, show a profile screen asking for the fields in `missing`. Only `name` can be missing: **Google users are never asked for a mobile number** (Google already verified them), and mobile sign-ups always have one.
 
 | Signed up with | Required | Optional |
 |---|---|---|
 | Mobile OTP | `name` | `email` |
-| Google | `name` (usually already filled from Google) and `mobile` | `email` |
+| Google | `name` (usually already filled from Google) | `email`, `mobile` |
 
-**Mobile sign-up:** name, and an email if the user wants one.
+**Save name / email / mobile** (no OTP needed):
 ```bash
-curl -s -X PUT $BASE/api/v1/users/me/profile -H "$AUTH"   -H "Content-Type: application/json"   -d '{ "name": "Ram Kumar", "email": "ram@example.com" }'
-```
-
-**Google sign-up:** the mobile number must be **verified with an OTP**. Run the MSG91 widget's `sendOtp(mobile)` exactly as for mobile login, then send the number, the OTP and the `reqId`:
-```bash
-curl -s -X PUT $BASE/api/v1/users/me/profile -H "$AUTH"   -H "Content-Type: application/json"   -d '{ "name": "Asha Rao", "mobile": "917081002501", "otp": "302348", "reqId": "36697a704157303534313839" }'
+curl -s -X PUT $BASE/api/v1/users/me/profile -H "$AUTH" -H "Content-Type: application/json"   -d '{ "name": "Asha Rao", "email": "asha@gmail.com", "mobile": "917081002501" }'
 ```
 ```json
-{ "success": true, "data": { "user": { "id": "6f1c…", "name": "Asha Rao", "mobile": "+917081002501", "email": "asha@gmail.com" }, "profile": { "complete": true, "missing": [] } } }
+{ "success": true, "data": { "user": { "id": "6f1c…", "name": "Asha Rao", "mobile": "+917081002501", "mobileVerified": false, "email": "asha@gmail.com" }, "profile": { "complete": true, "missing": [] } } }
 ```
-After this the user can log in **either** with Google **or** with that mobile number's OTP; both open the same account.
+`PATCH /api/v1/users/me` accepts the same `name`, `email` and `mobile` fields (partial update) and returns `{ user, profile }`.
+
+**`mobile` and `mobileVerified`** (in every user object):
+- `mobileVerified: true` is the number the user logs in with by OTP.
+- `mobileVerified: false` is a contact number saved without OTP. It's shown as the user's phone, but **it does not log in to this account**: if someone logs in by OTP with that number, they get their own separate account. This stops anyone from taking over an account by typing in a phone number.
+- **Optional:** to make a Google user's number a login number as well, send the MSG91 widget `otp` + `reqId` with it (same flow as mobile login). After that, Google and that number's OTP both open the same account.
 
 | Field | Rules |
 |---|---|
 | `name` | 2–100 characters; letters in any language (Hindi, Punjabi, …), spaces, `.` `'` `-`; extra spaces are trimmed |
 | `email` | optional; valid email; `""` or `null` removes it |
-| `mobile`, `otp`, `reqId` | only for accounts without a mobile number; same format as mobile login |
+| `mobile` | optional; Indian 10-digit or with country code |
+| `otp`, `reqId` | optional; only to verify `mobile` as a login number |
 
 | Error | Meaning |
 |---|---|
-| `422 VALIDATION_FAILED` | a required field is missing or invalid; `error.details[].field` says which |
-| `400 INVALID_MOBILE` / `INVALID_OTP_FORMAT` / `REQ_ID_REQUIRED` | mobile, OTP or reqId badly formatted |
-| `401 INVALID_OTP` / `OTP_MOBILE_MISMATCH` | wrong or expired OTP, or the OTP was sent to a different number |
-| `409 MOBILE_IN_USE` | that number already has its own account; log in with it (2.1) and link Google (2.3) |
-| `409 MOBILE_ALREADY_SET` | the account already has a different mobile number |
+| `422 VALIDATION_FAILED` | `name` missing or a field invalid; `error.details[].field` says which |
+| `400 INVALID_MOBILE` | mobile number badly formatted |
+| `400 INVALID_OTP_FORMAT` / `REQ_ID_REQUIRED` | only when verifying: OTP or reqId badly formatted |
+| `401 INVALID_OTP` / `OTP_MOBILE_MISMATCH` | only when verifying: wrong or expired OTP |
+| `409 MOBILE_IN_USE` | only when verifying: that number already has its own account |
+| `409 MOBILE_ALREADY_SET` | a mobile-login account tried to change its login number (not allowed here) |
 | `429 RATE_LIMITED` | too many OTP attempts |
 
 ---

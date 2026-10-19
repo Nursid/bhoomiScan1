@@ -69,9 +69,14 @@ const readRequest = (body) => {
 const profileStatus = (user) => {
   const missing = [];
   if (!user.name || !String(user.name).trim()) missing.push('name');
-  if (!user.mobile) missing.push('mobile');
+  // Google accounts never need a mobile number (Google verified the identity). Mobile
+  // sign-ups always have one, so in practice only `name` can be missing.
+  if (!user.mobile && !user.firebaseUid && !user.contactMobile) missing.push('mobile');
   return { complete: missing.length === 0, missing };
 };
+
+/** Phone shown to the app: the verified login number, else the contact number. */
+const displayMobile = (user) => user.mobile || user.contactMobile || null;
 
 /* --------------------------- Application login step ----------------------- */
 
@@ -98,6 +103,7 @@ const issueApplicationLogin = async (mobile) => {
     user: {
       id: user.id,
       mobile: user.mobile,
+      mobileVerified: true,
       name: user.name || null,
       email: user.email || null,
       loginMethod: LOGIN_METHOD,
@@ -189,7 +195,8 @@ const ensureGoogleConfigured = () => {
 
 const googleUserResponse = (user) => ({
   id: user.id,
-  mobile: user.mobile || null,
+  mobile: displayMobile(user),
+  mobileVerified: Boolean(user.mobile),
   email: user.email || null,
   name: user.name || null,
   loginMethod: GOOGLE_LOGIN_METHOD,
@@ -278,40 +285,68 @@ const isUniqueViolation = (error) => error?.code === 'P2002';
  * A mobile number is only accepted with an OTP proving it (MSG91 widget reqId),
  * because mobile OTP login finds accounts by that number.
  */
+/**
+ * The user-table change for a submitted `mobile`:
+ *  - account already has a verified (login) number: same number is a no-op, a different
+ *    one is refused (the login number only changes through a new OTP login)
+ *  - `otp` + `reqId` sent: verified with MSG91, becomes the login number (as before)
+ *  - otherwise: saved as the contact number, shown as the phone but never used to log in,
+ *    so typing a number cannot hand that number's OTP logins into this account
+ */
+const mobileChange = async (record, input) => {
+  const requested = normalizeMobile(input.mobile);
+  if (input.mobile === null || input.mobile === '') {
+    return record.mobile ? {} : { contactMobile: null };
+  }
+  if (!requested) throw authError(400, 'INVALID_MOBILE', 'Invalid mobile number');
+
+  if (record.mobile) {
+    if (requested.e164 !== record.mobile) {
+      throw authError(409, 'MOBILE_ALREADY_SET', 'Your account already has a mobile number');
+    }
+    return {};
+  }
+
+  if (input.otp !== undefined || input.reqId !== undefined) {
+    if (!msg91.isConfigured()) {
+      throw authError(503, 'OTP_NOT_CONFIGURED', 'Mobile OTP verification is not configured on the server (MSG91).');
+    }
+    const request = readRequest(input);
+    // OTP first, so this endpoint never reveals whether a number is registered.
+    await verifyMobileOtp(request);
+    const owner = await prisma.user.findUnique({ where: { mobile: request.mobile.e164 }, select: { id: true } });
+    if (owner) {
+      throw authError(409, 'MOBILE_IN_USE', 'This mobile number already has a BhoomiScan account. Log in with it, then link Google.');
+    }
+    return { mobile: request.mobile.e164, contactMobile: null };
+  }
+
+  return { contactMobile: requested.e164 };
+};
+
+/** PATCH /users/me: name / email / mobile (mobile follows mobileChange). */
+const updateProfile = async (userId, input) => {
+  const record = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
+  const data = {};
+  if (input.name !== undefined) data.name = input.name;
+  if (input.email !== undefined) data.email = input.email;
+  if (input.mobile !== undefined) Object.assign(data, await mobileChange(record, input));
+  return Object.keys(data).length ? prisma.user.update({ where: { id: userId }, data }) : record;
+};
+
 const completeProfile = async (userId, input) => {
   const record = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
 
-  const missing = [];
-  if (!input.name && !record.name) missing.push({ location: 'body', field: 'name', message: 'Name is required' });
-  if (!input.mobile && !record.mobile) missing.push({ location: 'body', field: 'mobile', message: 'Mobile number is required (verify it with an OTP)' });
-  if (missing.length > 0) {
-    throw new AppError(422, 'VALIDATION_FAILED', 'Request validation failed', { details: missing });
+  if (!input.name && !record.name) {
+    throw new AppError(422, 'VALIDATION_FAILED', 'Request validation failed', {
+      details: [{ location: 'body', field: 'name', message: 'Name is required' }],
+    });
   }
 
   const data = {};
   if (input.name) data.name = input.name;
   if (input.email !== undefined) data.email = input.email; // null clears it
-
-  if (input.mobile !== undefined) {
-    const requested = normalizeMobile(input.mobile);
-    if (record.mobile) {
-      if (requested?.e164 !== record.mobile) {
-        throw authError(409, 'MOBILE_ALREADY_SET', 'Your account already has a mobile number');
-      }
-    } else {
-      if (!msg91.isConfigured()) {
-        throw authError(503, 'OTP_NOT_CONFIGURED', 'Mobile OTP verification is not configured on the server (MSG91).');
-      }
-      const request = readRequest(input);
-      // OTP first, so this endpoint never reveals whether a number is registered.
-      await verifyMobileOtp(request);
-      const owner = await prisma.user.findUnique({ where: { mobile: request.mobile.e164 }, select: { id: true } });
-      if (owner) {
-        throw authError(409, 'MOBILE_IN_USE', 'This mobile number already has a BhoomiScan account. Log in with it, then link Google.');
-      }
-      data.mobile = request.mobile.e164;
-    }
-  }
+  if (input.mobile !== undefined) Object.assign(data, await mobileChange(record, input));
 
   let user = record;
   if (Object.keys(data).length > 0) {
@@ -326,7 +361,7 @@ const completeProfile = async (userId, input) => {
   }
   logger.info({ userId, fields: Object.keys(data) }, 'profile updated');
   return {
-    user: { id: user.id, name: user.name || null, mobile: user.mobile || null, email: user.email || null },
+    user: { id: user.id, name: user.name || null, mobile: displayMobile(user), mobileVerified: Boolean(user.mobile), email: user.email || null },
     profile: profileStatus(user),
   };
 };
@@ -338,7 +373,8 @@ const me = async (user, claims) => {
     success: true,
     user: {
       id: record.id,
-      mobile: record.mobile || null,
+      mobile: displayMobile(record),
+      mobileVerified: Boolean(record.mobile),
       email: record.email || null,
       role: record.role.toLowerCase(),
       loginMethod: claims.loginMethod || null,
@@ -349,7 +385,8 @@ const me = async (user, claims) => {
 
 const publicUser = (user) => ({
   id: user.id,
-  mobile: user.mobile,
+  mobile: displayMobile(user),
+  mobileVerified: Boolean(user.mobile),
   name: user.name,
   email: user.email,
   role: user.role,
@@ -357,4 +394,4 @@ const publicUser = (user) => ({
   lastLoginAt: user.lastLoginAt,
 });
 
-module.exports = { mobileVerify, googleLogin, linkGoogle, completeProfile, profileStatus, me, publicUser, issueApplicationLogin, __testing: { readRequest, readIdToken } };
+module.exports = { mobileVerify, googleLogin, linkGoogle, completeProfile, updateProfile, profileStatus, displayMobile, me, publicUser, issueApplicationLogin, __testing: { readRequest, readIdToken } };

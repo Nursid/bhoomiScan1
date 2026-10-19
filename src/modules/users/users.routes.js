@@ -4,22 +4,26 @@ const { prisma } = require('../../database/prisma');
 const { authenticate } = require('../../middleware/authenticate');
 const validate = require('../../middleware/validate');
 const { ok } = require('../../utils/response');
-const { publicUser, profileStatus, completeProfile } = require('../auth/auth.service');
+const { publicUser, profileStatus, completeProfile, updateProfile } = require('../auth/auth.service');
 const { otpVerifyLimiters } = require('../../middleware/rateLimiters');
 const subscriptionsService = require('../subscriptions/subscriptions.service');
+
+const stringOrNumber = z.union([z.string(), z.number()]).transform((value) => String(value).trim());
 
 const updateMeSchema = z
   .object({
     name: z.string().trim().min(1).max(100).optional(),
     email: z.string().trim().toLowerCase().email().max(200).nullable().optional(),
+    // No OTP needed: saved as the contact number (see auth.service mobileChange).
+    mobile: z.union([stringOrNumber, z.null()]).optional(),
+    otp: stringOrNumber.optional(),
+    reqId: z.string().trim().max(64).optional(),
   })
   .strict()
   .refine((value) => Object.keys(value).length > 0, 'No updatable fields provided');
 
 // Letters in any script (Hindi, Punjabi, ...) plus spaces, dots, apostrophes and hyphens.
 const NAME_PATTERN = /^[\p{L}\p{M}][\p{L}\p{M} .'-]*$/u;
-
-const stringOrNumber = z.union([z.string(), z.number()]).transform((value) => String(value).trim());
 
 const profileSchema = z
   .object({
@@ -33,7 +37,8 @@ const profileSchema = z
       .union([z.literal(''), z.null(), z.string().trim().toLowerCase().email('Invalid email').max(200)])
       .transform((value) => value || null)
       .optional(),
-    // Only for accounts without a mobile number (Google sign-up), with the MSG91 widget OTP.
+    // Optional. Without otp/reqId it is saved as the contact number (no OTP needed);
+    // with the MSG91 widget otp + reqId it is verified and also becomes a login number.
     mobile: stringOrNumber.optional(),
     otp: stringOrNumber.optional(),
     reqId: z.string().trim().max(64).optional(),
@@ -54,18 +59,25 @@ router.get('/me', async (req, res) => {
   });
 });
 
+// OTP attempts stay rate limited; plain profile edits are not.
+const limitOtpAttempts = (req, res, next) => {
+  if (req.body.otp === undefined) return next();
+  const [byMobile, byIp] = otpVerifyLimiters;
+  return byMobile(req, res, (error) => (error ? next(error) : byIp(req, res, next)));
+};
+
 /**
  * Complete / update the profile after login.
- *   Google sign-up:  { name, mobile, otp, reqId }   (mobile proven with the MSG91 widget OTP)
- *   Mobile sign-up:  { name, email? }               (email optional)
+ *   Required: name (Google accounts are complete without a mobile number).
+ *   Optional: email; mobile (no OTP needed -> contact number; with otp + reqId -> verified login number)
  */
-router.put('/me/profile', validate({ body: profileSchema }), ...otpVerifyLimiters, async (req, res) =>
+router.put('/me/profile', validate({ body: profileSchema }), limitOtpAttempts, async (req, res) =>
   ok(res, await completeProfile(req.user.id, req.body)),
 );
 
-router.patch('/me', validate({ body: updateMeSchema }), async (req, res) => {
-  const user = await prisma.user.update({ where: { id: req.user.id }, data: req.body });
-  ok(res, { user: publicUser(user) });
+router.patch('/me', validate({ body: updateMeSchema }), limitOtpAttempts, async (req, res) => {
+  const user = await updateProfile(req.user.id, req.body);
+  ok(res, { user: publicUser(user), profile: profileStatus(user) });
 });
 
 module.exports = router;

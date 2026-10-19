@@ -50,7 +50,7 @@ describe('auth', () => {
     expect(res.body).toEqual({
       success: true,
       token: expect.any(String),
-      user: { id: expect.any(String), mobile: '+919876543210', name: null, email: null, loginMethod: 'mobile_otp', isProfileCompleted: false, lastLoginAt: expect.any(String) },
+      user: { id: expect.any(String), mobile: '+919876543210', mobileVerified: true, name: null, email: null, loginMethod: 'mobile_otp', isProfileCompleted: false, lastLoginAt: expect.any(String) },
       profile: { complete: false, missing: ['name'] },
     });
 
@@ -68,7 +68,7 @@ describe('auth', () => {
     expect(me.status).toBe(200);
     expect(me.body).toEqual({
       success: true,
-      user: { id: user.id, mobile: '+919876543210', email: null, role: 'user', loginMethod: 'mobile_otp' },
+      user: { id: user.id, mobile: '+919876543210', mobileVerified: true, email: null, role: 'user', loginMethod: 'mobile_otp' },
       expiresAt: expect.any(String),
     });
     expect((await app.get('/api/auth/me')).status).toBe(401);

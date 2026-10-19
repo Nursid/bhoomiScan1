@@ -64,13 +64,15 @@ describe('POST /api/auth/google', () => {
       user: {
         id: expect.any(String),
         mobile: null,
+        mobileVerified: false,
         email: 'asha@example.com',
         name: 'Asha Rao',
         loginMethod: 'google',
-        isProfileCompleted: false,
+        isProfileCompleted: true,
         lastLoginAt: expect.any(String),
       },
-      profile: { complete: false, missing: ['mobile'] },
+      // Google accounts never need a mobile number.
+      profile: { complete: true, missing: [] },
     });
     expect(firebase.verifyIdToken).toHaveBeenCalledWith(idToken('asha'));
 
@@ -81,7 +83,7 @@ describe('POST /api/auth/google', () => {
     const auth = { Authorization: `Bearer ${res.body.token}` };
     const me = await app.get('/api/auth/me').set(auth);
     expect(me.status).toBe(200);
-    expect(me.body.user).toEqual({ id: record.id, mobile: null, email: 'asha@example.com', role: 'user', loginMethod: 'google' });
+    expect(me.body.user).toEqual({ id: record.id, mobile: null, mobileVerified: false, email: 'asha@example.com', role: 'user', loginMethod: 'google' });
     const profile = await app.get('/api/v1/users/me').set(auth);
     expect(profile.status).toBe(200);
     expect(profile.body.data.user).toMatchObject({ id: record.id, mobile: null, email: 'asha@example.com' });
@@ -252,7 +254,7 @@ describe('mobile OTP login alongside Google accounts', () => {
     await googleLogin(app, idToken('asha'));
     await googleLogin(app, idToken('ravi'));
     const otp = await login(app, '9876543210');
-    expect(otp.user).toEqual({ id: expect.any(String), mobile: '+919876543210', name: null, email: null, loginMethod: 'mobile_otp', isProfileCompleted: false, lastLoginAt: expect.any(String) });
+    expect(otp.user).toEqual({ id: expect.any(String), mobile: '+919876543210', mobileVerified: true, name: null, email: null, loginMethod: 'mobile_otp', isProfileCompleted: false, lastLoginAt: expect.any(String) });
     expect(await prisma.user.count({ where: { mobile: null } })).toBe(2);
     expect(await prisma.user.count()).toBe(3);
   });

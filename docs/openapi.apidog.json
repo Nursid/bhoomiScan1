@@ -963,7 +963,7 @@
           "Users"
         ],
         "summary": "Complete / update the profile after login",
-        "description": "Login responses and GET /users/me return profile { complete, missing }.\nMobile sign-up requires name (email optional). Google sign-up requires name and a mobile\nnumber verified with the MSG91 widget OTP (mobile + otp + reqId).\n",
+        "description": "Login responses and GET /users/me return profile { complete, missing }. Only `name` is\nrequired; Google accounts are complete without a mobile number. `mobile` is optional and\nneeds no OTP: it is saved as a contact number (mobileVerified false) that is shown as the\nphone but never used for OTP login. With the MSG91 widget otp + reqId it is verified and\nalso becomes a login number (mobileVerified true). PATCH /users/me accepts the same fields.\n",
         "requestBody": {
           "required": true,
           "content": {
@@ -985,15 +985,17 @@
                   "mobile": {
                     "type": "string",
                     "example": "917081002501",
-                    "description": "only for accounts without a mobile"
+                    "description": "optional; no OTP needed (saved as contact number)"
                   },
                   "otp": {
                     "type": "string",
-                    "example": "302348"
+                    "example": "302348",
+                    "description": "optional; only to verify mobile as a login number"
                   },
                   "reqId": {
                     "type": "string",
-                    "example": "36697a704157303534313839"
+                    "example": "36697a704157303534313839",
+                    "description": "optional; with otp"
                   }
                 }
               }
@@ -1026,6 +1028,9 @@
                             "mobile": {
                               "type": "string",
                               "nullable": true
+                            },
+                            "mobileVerified": {
+                              "type": "boolean"
                             },
                             "email": {
                               "type": "string",

@@ -130,6 +130,9 @@ model User {
   mobile      String?    @unique
   // Firebase Auth UID, set only from a server-verified Firebase ID token (Google login).
   firebaseUid String?    @unique @map("firebase_uid")
+  // Number entered without OTP (Google sign-ups). Shown as the user's phone, but never
+  // used to log in: mobile OTP login only matches the verified `mobile` above.
+  contactMobile String?  @map("contact_mobile")
   name        String?
   email       String?
   passwordHash String?   @map("password_hash")

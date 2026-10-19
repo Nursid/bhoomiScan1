@@ -404,9 +404,11 @@ paths:
       tags: [Users]
       summary: Complete / update the profile after login
       description: |
-        Login responses and GET /users/me return profile { complete, missing }.
-        Mobile sign-up requires name (email optional). Google sign-up requires name and a mobile
-        number verified with the MSG91 widget OTP (mobile + otp + reqId).
+        Login responses and GET /users/me return profile { complete, missing }. Only `name` is
+        required; Google accounts are complete without a mobile number. `mobile` is optional and
+        needs no OTP: it is saved as a contact number (mobileVerified false) that is shown as the
+        phone but never used for OTP login. With the MSG91 widget otp + reqId it is verified and
+        also becomes a login number (mobileVerified true). PATCH /users/me accepts the same fields.
       requestBody:
         required: true
         content:
@@ -416,9 +418,9 @@ paths:
               properties:
                 name: { type: string, minLength: 2, maxLength: 100, example: Ram Kumar }
                 email: { type: string, nullable: true, description: 'optional; "" or null removes it' }
-                mobile: { type: string, example: '917081002501', description: only for accounts without a mobile }
-                otp: { type: string, example: '302348' }
-                reqId: { type: string, example: '36697a704157303534313839' }
+                mobile: { type: string, example: '917081002501', description: 'optional; no OTP needed (saved as contact number)' }
+                otp: { type: string, example: '302348', description: optional; only to verify mobile as a login number }
+                reqId: { type: string, example: '36697a704157303534313839', description: optional; with otp }
       responses:
         '200':
           description: Saved
@@ -431,7 +433,7 @@ paths:
                   data:
                     type: object
                     properties:
-                      user: { type: object, properties: { id: { type: string }, name: { type: string }, mobile: { type: string, nullable: true }, email: { type: string, nullable: true } } }
+                      user: { type: object, properties: { id: { type: string }, name: { type: string }, mobile: { type: string, nullable: true }, mobileVerified: { type: boolean }, email: { type: string, nullable: true } } }
                       profile: { type: object, properties: { complete: { type: boolean }, missing: { type: array, items: { type: string, enum: [name, mobile] } } } }
         '400': { description: 'INVALID_MOBILE / INVALID_OTP_FORMAT / REQ_ID_REQUIRED' }
         '401': { description: 'INVALID_OTP / OTP_MOBILE_MISMATCH' }
